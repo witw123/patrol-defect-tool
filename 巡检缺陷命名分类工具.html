@@ -1743,7 +1743,7 @@
   </div>
 
 
-<div id="settingsBackdrop"></div><div id="settingsPanel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1"><header class="settings-heading"><div><h2 id="settingsTitle">设置</h2><p>外观、操作习惯与分类模板</p></div><button id="btnCloseSettings" class="btn" type="button" aria-label="关闭设置">关闭 ✕</button></header><div class="settings-grid"><section class="settings-section"><h3>外观与布局</h3><div class="row"><span>黑夜模式</span><button id="themeSwitch" class="switch" type="button"></button></div><div class="row"><button id="btnResetBackPosition" class="btn" type="button">恢复定位按钮位置</button></div><p class="settings-help">“最后一个已看”可拖动到窗口内任意位置。位置会自动记住；Alt + 方向键可微调。</p></section><section class="settings-section"><h3>规则与模板</h3><div class="row"><span>自动分类全绝缘/其它缺陷</span><button id="autoClassifyInsulationSwitch" class="switch on" type="button" title="保存缺陷时自动同步分类到「全绝缘缺陷」与「其它缺陷」文件夹"></button></div><div class="row"><button id="btnClassifyInsulationSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px;color:var(--accent);font-weight:600">一键分类全绝缘与其它缺陷文件夹</button></div><div class="row"><button id="btnOpenRecSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">修改推荐与分类规则</button></div><div class="row"><button id="btnExportTemplateSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">导出标签与推荐模板</button></div><div class="row"><button id="btnImportTemplateSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">导入外部模板文件</button></div></section><section class="settings-section"><h3>键盘快捷键</h3><div class="row" style="flex-direction:column;align-items:stretch;gap:6px">
+<div id="settingsBackdrop"></div><div id="settingsPanel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1"><header class="settings-heading"><div><h2 id="settingsTitle">设置</h2><p>外观、操作习惯与分类模板</p></div><button id="btnCloseSettings" class="btn" type="button" aria-label="关闭设置">关闭 ✕</button></header><div class="settings-grid"><section class="settings-section"><h3>外观与布局</h3><div class="row"><span>黑夜模式</span><button id="themeSwitch" class="switch" type="button"></button></div><div class="row"><button id="btnResetBackPosition" class="btn" type="button">恢复定位按钮位置</button></div><p class="settings-help">“最后一个已看”可拖动到窗口内任意位置。位置会自动记住；Alt + 方向键可微调。</p></section><section class="settings-section"><h3>规则与模板</h3><div class="row"><span>自动分类全绝缘/其它缺陷</span><button id="autoClassifyInsulationSwitch" class="switch" type="button" title="保存缺陷时自动同步分类到「全绝缘缺陷」与「其它缺陷」文件夹（默认关闭）"></button></div><div class="row" style="flex-direction:column;align-items:stretch;gap:6px"><div style="display:flex;align-items:center;justify-content:space-between"><span>全绝缘标签与关键词</span><button id="btnResetInsulationKeywords" class="btn" type="button" style="height:22px;padding:0 8px;font-size:10.5px">恢复默认</button></div><input id="inputInsulationKeywords" type="text" placeholder="输入关键词，多个用逗号隔开" style="height:28px;padding:0 8px;border:1px solid var(--btn-border);border-radius:4px;background:var(--input-bg);color:var(--text);font:inherit;font-size:11.5px"><div style="font-size:10.5px;color:var(--muted);line-height:1.4">包含上述任一关键词的标签将归类为「全绝缘缺陷」，其它归为「其它缺陷」（支持逗号或空格分隔，默认：绝缘, 裸导线）。</div></div><div class="row"><button id="btnClassifyInsulationSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px;color:var(--accent);font-weight:600">一键分类全绝缘与其它缺陷文件夹</button></div><div class="row"><button id="btnOpenRecSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">修改推荐与分类规则</button></div><div class="row"><button id="btnExportTemplateSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">导出标签与推荐模板</button></div><div class="row"><button id="btnImportTemplateSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">导入外部模板文件</button></div></section><section class="settings-section"><h3>键盘快捷键</h3><div class="row" style="flex-direction:column;align-items:stretch;gap:6px">
       <span>图片切换按键</span>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
         <span style="font-size:11px;color:var(--muted)">上一张</span>
@@ -2555,6 +2555,7 @@
   var btnEmptyRestore = $('btnEmptyRestore'), emptyRestoreDirName = $('emptyRestoreDirName');
   var btnOutput = $('btnOutput'), outputDirName = $('outputDirName'), btnCreateOrigFromBoxed = $('btnCreateOrigFromBoxed'), btnCleanDefectNames = $('btnCleanDefectNames');
   var btnClassifyInsulation = $('btnClassifyInsulation'), btnClassifyInsulationMenu = $('btnClassifyInsulationMenu'), btnClassifyInsulationSettings = $('btnClassifyInsulationSettings'), autoClassifyInsulationSwitch = $('autoClassifyInsulationSwitch');
+  var inputInsulationKeywords = $('inputInsulationKeywords'), btnResetInsulationKeywords = $('btnResetInsulationKeywords');
   var strokeSlider = $('strokeSlider'), strokeVal = $('strokeVal');
   var searchInput = $('searchInput'), searchClear = $('searchClear');
   var btnExportTemplate = $('btnExportTemplate'), btnImportTemplate = $('btnImportTemplate');
@@ -5189,7 +5190,8 @@
         defectDict: defectDict,
         locationAdjacency: locationAdjacency,
         candidatePool: candidatePool,
-        criticalDefects: Array.from(criticalDefects)
+        criticalDefects: Array.from(criticalDefects),
+        insulationKeywords: getInsulationKeywords()
       };
 
       var jsonStr = JSON.stringify(template, null, 2);
@@ -5238,7 +5240,8 @@
           defectDict: data.defectDict || {},
           locationAdjacency: data.locationAdjacency || {},
           candidatePool: Array.isArray(data.candidatePool) ? data.candidatePool : null,
-          criticalDefects: Array.isArray(data.criticalDefects) ? data.criticalDefects : null
+          criticalDefects: Array.isArray(data.criticalDefects) ? data.criticalDefects : null,
+          insulationKeywords: Array.isArray(data.insulationKeywords) ? data.insulationKeywords : null
         };
 
         var catNum = Object.keys(pendingImportData.defectDict).length;
@@ -5292,6 +5295,9 @@
     if (pendingImportData.candidatePool) {
       candidatePool = pendingImportData.candidatePool.slice();
       saveCandidatePool();
+    }
+    if (Array.isArray(pendingImportData.insulationKeywords)) {
+      setInsulationKeywords(pendingImportData.insulationKeywords);
     }
     saveDefectDict();
     saveCriticalDefects();
@@ -5357,6 +5363,10 @@
 
     if (pendingImportData.candidatePool) {
       newPool = addCandidatePoolItem(pendingImportData.candidatePool);
+    }
+    if (Array.isArray(pendingImportData.insulationKeywords)) {
+      var mergedKw = Array.from(new Set(getInsulationKeywords().concat(pendingImportData.insulationKeywords)));
+      setInsulationKeywords(mergedKw);
     }
 
     saveDefectDict();
@@ -7469,6 +7479,22 @@ else if (((e.key.toLowerCase() === customSaveKey) && !isInput && !hasActiveModal
       toast(nextVal ? '已开启保存时自动分类至全绝缘与其它缺陷文件夹' : '已关闭自动同步分类');
     });
   }
+  if (inputInsulationKeywords) {
+    inputInsulationKeywords.value = getInsulationKeywords().join(', ');
+    inputInsulationKeywords.addEventListener('change', function () {
+      var raw = inputInsulationKeywords.value;
+      var arr = raw.split(/[,，\s]+/).map(function(s){ return s.trim(); }).filter(Boolean);
+      if (!arr.length) arr = DEFAULT_INSULATION_KEYWORDS.slice();
+      setInsulationKeywords(arr);
+      toast('已更新全绝缘标签关键词：' + arr.join('、'));
+    });
+  }
+  if (btnResetInsulationKeywords) {
+    btnResetInsulationKeywords.addEventListener('click', function () {
+      setInsulationKeywords(DEFAULT_INSULATION_KEYWORDS.slice());
+      toast('已恢复默认全绝缘关键词（' + DEFAULT_INSULATION_KEYWORDS.join('、') + '）');
+    });
+  }
   btnResetDefects.addEventListener('click', function () {
     showConfirmDialog('重置缺陷分类', '确定要重置所有缺陷分类与标签为系统默认值吗？此操作将清除自定义分类。').then(function (ok) {
       if (!ok) return;
@@ -7907,18 +7933,44 @@ else if (((e.key.toLowerCase() === customSaveKey) && !isInput && !hasActiveModal
 
   /* ================= 一键分类全绝缘缺陷和其它缺陷文件夹 ================= */
 
+  var DEFAULT_INSULATION_KEYWORDS = ['绝缘', '裸导线'];
+  var KEY_INSULATION_KEYWORDS = 'xunjian_insulation_keywords';
+
+  function getInsulationKeywords() {
+    try {
+      var v = localStorage.getItem(KEY_INSULATION_KEYWORDS);
+      if (v) {
+        var parsed = JSON.parse(v);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return DEFAULT_INSULATION_KEYWORDS.slice();
+  }
+
+  function setInsulationKeywords(arr) {
+    try {
+      localStorage.setItem(KEY_INSULATION_KEYWORDS, JSON.stringify(arr));
+    } catch (e) {}
+    if (inputInsulationKeywords) {
+      inputInsulationKeywords.value = arr.join(', ');
+    }
+  }
+
   function isFullInsulationDefect(nameOrTag) {
     if (!nameOrTag || typeof nameOrTag !== 'string') return false;
-    return nameOrTag.includes('绝缘') || nameOrTag.includes('裸导线');
+    var keywords = getInsulationKeywords();
+    return keywords.some(function(kw) {
+      return kw && nameOrTag.includes(kw);
+    });
   }
 
   var AUTO_CLASSIFY_KEY = 'xunjian_auto_classify_insulation';
   function getAutoClassifyInsulation() {
     try {
       var v = localStorage.getItem(AUTO_CLASSIFY_KEY);
-      return v === null ? true : JSON.parse(v);
+      return v === null ? false : JSON.parse(v);
     } catch (e) {
-      return true;
+      return false;
     }
   }
   function setAutoClassifyInsulation(val) {
@@ -7969,9 +8021,10 @@ else if (((e.key.toLowerCase() === customSaveKey) && !isInput && !hasActiveModal
         }
       }
 
+      var kwNames = getInsulationKeywords().join('、');
       var confirmMsg = '【一键分类全绝缘与其它缺陷文件夹】\n\n' +
         '扫描到「' + DIR_BOX + '」共 ' + boxFiles.length + ' 张成果照片：\n' +
-        '• 全绝缘缺陷（含“绝缘”或“裸导线”）：' + fullInsulationList.length + ' 张\n' +
+        '• 全绝缘缺陷（命中关键词：' + kwNames + '）：' + fullInsulationList.length + ' 张\n' +
         '• 其它缺陷：' + otherDefectList.length + ' 张\n\n' +
         '系统将在输出目录中自动创建分类归档文件夹：\n' +
         '📁 全绝缘缺陷/ (' + DIR_BOX + '、' + DIR_ORIG + ')\n' +
@@ -8514,7 +8567,11 @@ else if (((e.key.toLowerCase() === customSaveKey) && !isInput && !hasActiveModal
   function toggleSettings39(force) {
     var open=typeof force==='boolean'?force:!settingsPanel.classList.contains('show');
     settingsPanel.inert=!open;settingsPanel.classList.toggle('show',open);$('settingsBackdrop').classList.toggle('show',open);btnSettings.setAttribute('aria-expanded',String(open));
-    if(open)$('btnCloseSettings').focus();else btnSettings.focus();
+    if(open){
+      if(inputInsulationKeywords) inputInsulationKeywords.value = getInsulationKeywords().join(', ');
+      if(autoClassifyInsulationSwitch) autoClassifyInsulationSwitch.classList.toggle('on', getAutoClassifyInsulation());
+      $('btnCloseSettings').focus();
+    } else btnSettings.focus();
   }
   function initLayout39() {
     $('btnCloseSettings').addEventListener('click',function(){toggleSettings39(false);});
