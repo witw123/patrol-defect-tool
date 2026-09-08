@@ -7810,7 +7810,7 @@ else if (((e.key.toLowerCase() === customSaveKey) && !isInput && !hasActiveModal
       });
       if(!manual && getAutoClassifyInsulation()) {
         try {
-          var targetTopDirName = isFullInsulationDefect(tag || nv.base) ? '全绝缘缺陷' : '其它缺陷';
+          var targetTopDirName = (isFullInsulationDefect(tag) || isFullInsulationDefect(nv.base)) ? '全绝缘缺陷' : '其它缺陷';
           var topDir = await output.mainHandle.getDirectoryHandle(targetTopDirName, { create: true });
           var topBoxDir = await topDir.getDirectoryHandle(DIR_BOX, { create: true });
           var topOrigDir = await topDir.getDirectoryHandle(DIR_ORIG, { create: true });
@@ -7909,7 +7909,7 @@ else if (((e.key.toLowerCase() === customSaveKey) && !isInput && !hasActiveModal
 
   function isFullInsulationDefect(nameOrTag) {
     if (!nameOrTag || typeof nameOrTag !== 'string') return false;
-    return nameOrTag.includes('全绝缘');
+    return nameOrTag.includes('绝缘') || nameOrTag.includes('裸导线');
   }
 
   var AUTO_CLASSIFY_KEY = 'xunjian_auto_classify_insulation';
@@ -7971,7 +7971,7 @@ else if (((e.key.toLowerCase() === customSaveKey) && !isInput && !hasActiveModal
 
       var confirmMsg = '【一键分类全绝缘与其它缺陷文件夹】\n\n' +
         '扫描到「' + DIR_BOX + '」共 ' + boxFiles.length + ' 张成果照片：\n' +
-        '• 全绝缘缺陷：' + fullInsulationList.length + ' 张\n' +
+        '• 全绝缘缺陷（含“绝缘”或“裸导线”）：' + fullInsulationList.length + ' 张\n' +
         '• 其它缺陷：' + otherDefectList.length + ' 张\n\n' +
         '系统将在输出目录中自动创建分类归档文件夹：\n' +
         '📁 全绝缘缺陷/ (' + DIR_BOX + '、' + DIR_ORIG + ')\n' +
