@@ -1882,7 +1882,7 @@
   var IMG_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'];
   var strokeWidth = 10;
   var MIN_ZOOM = 0.1, MAX_ZOOM = 10, HANDLE_PX = 8;
-  var CACHE_LIMIT = 14;
+  var CACHE_LIMIT = 8;
 
   var KEY_THEME = 'xunjian_theme';
   var KEY_NO_PROMPT = 'xunjian_no_prompt';
@@ -2437,6 +2437,9 @@
   var collapsedTowers = new Set(); // 折叠的杆塔分组标识集合
   var lastActiveTowerKey = null;   // 当前激活展开的杆塔唯一键 (prefix:::tower)
   var lastActivePrefix = null;     // 当前激活展开的线路前缀
+  var lastActiveTowerEl = null;    // 当前激活展开的杆塔 DOM 元素缓存
+  var lastActivePrefixEl = null;   // 当前激活展开的线路 DOM 元素缓存
+  var lastActiveLocItemEl = null;  // 当前选中的左侧列表项 DOM 元素缓存
   var lastTreeScrollTime = 0;      // 记录上次左侧树平滑滚动的时间戳，用于快切降级
   var dirRegistry = new Map();     // relDirPath -> { handle, parentHandle, name } 文件夹句柄注册表
   var theme = 'light';
@@ -3042,6 +3045,9 @@
     collapsedTowers.clear();
     lastActiveTowerKey = null;
     lastActivePrefix = null;
+    lastActiveTowerEl = null;
+    lastActivePrefixEl = null;
+    lastActiveLocItemEl = null;
     filterMode = 'all';
     btnFilterAll.classList.add('active');
     btnFilterMarked.classList.remove('active');
@@ -3095,6 +3101,8 @@
     if (c.img && c.img.tagName === 'IMG') {
       c.img.src = '';
     }
+    c.img = null;
+    c.url = null;
   }
 
   function clearCache() {
@@ -3109,16 +3117,18 @@
   /* ================= 图片加载 / 缓存与硬件级预解码引擎 ================= */
 
   // 浏览器兼容性图片解码器：优先原生硬件级后台解码 createImageBitmap，回退标准 HTMLImageElement
-  async function decodeImageSource(blob, url) {
+  async function decodeImageSource(blob) {
     if (typeof createImageBitmap === 'function') {
       try {
         var bmp = await createImageBitmap(blob);
-        return bmp;
+        return { img: bmp, url: null };
       } catch (bmpErr) {
         console.warn('createImageBitmap 硬件解码受阻，自动回退至常规 Image 解码:', bmpErr);
       }
     }
-    return await loadImageElement(url);
+    var url = URL.createObjectURL(blob);
+    var img = await loadImageElement(url);
+    return { img: img, url: url };
   }
 
   function loadImageElement(url) {
@@ -3184,7 +3194,6 @@
     var loadPromise = (async function () {
       try {
         var blob = null;
-        var url = null;
         var isBoxedImg = false;
         if (isMarked) {
           try {
@@ -3206,8 +3215,9 @@
           }
         }
 
-        url = URL.createObjectURL(blob);
-        var img = await decodeImageSource(blob, url);
+        var decoded = await decodeImageSource(blob);
+        var img = decoded.img;
+        var url = decoded.url;
         var nw = img.naturalWidth || img.width;
         var nh = img.naturalHeight || img.height;
 
@@ -3238,16 +3248,19 @@
   function evictLRU(cur) {
     if (state.cache.size <= CACHE_LIMIT) return;
     var currentKey = curKey();
+    var curIdx = (state.index >= 0) ? state.index : cur;
     var keys = Array.from(state.cache.keys());
     keys.sort(function (a, b) {
-      var ia = (state.indexByKey && state.indexByKey.has(a)) ? state.indexByKey.get(a) : cur;
-      var ib = (state.indexByKey && state.indexByKey.has(b)) ? state.indexByKey.get(b) : cur;
-      return Math.abs(ib - cur) - Math.abs(ia - cur);
+      var ia = (state.indexByKey && state.indexByKey.has(a)) ? state.indexByKey.get(a) : curIdx;
+      var ib = (state.indexByKey && state.indexByKey.has(b)) ? state.indexByKey.get(b) : curIdx;
+      return Math.abs(ib - curIdx) - Math.abs(ia - curIdx);
     });
     for (var i = 0; i < keys.length; i++) {
       if (state.cache.size <= CACHE_LIMIT) break;
       var k = keys[i];
       if (k === currentKey) continue;
+      var curF = state.files && state.files[state.index];
+      if (curF && fileKey(curF) === k) continue;
       var c = state.cache.get(k);
       disposeCacheItem(c);
       state.cache.delete(k);
@@ -3279,9 +3292,9 @@
     var seen = new Set();
     seen.add(curIdx);
 
-    // 1. 向前预测 7 张（切图主方向，优先级最高）
+    // 1. 向前预测 4 张（切图主方向，优先级最高）
     var fwd = curIdx;
-    for (var i = 0; i < 7; i++) {
+    for (var i = 0; i < 4; i++) {
       var next = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(fwd, 1) : (fwd + 1);
       if (next >= 0 && next < state.files.length && !seen.has(next)) {
         seen.add(next);
@@ -3292,9 +3305,9 @@
       }
     }
 
-    // 2. 向后缓冲 3 张（倒退回看缓冲）
+    // 2. 向后缓冲 2 张（倒退回看缓冲）
     var bwd = curIdx;
-    for (var j = 0; j < 3; j++) {
+    for (var j = 0; j < 2; j++) {
       var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(bwd, -1) : (bwd - 1);
       if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
         seen.add(prev);
@@ -3411,13 +3424,25 @@
     ctx.scale(v.zoom, v.zoom);
     ctx.translate(-v.cx, -v.cy);
   }
-  function renderBase() {
+  var currentRenderedImg = null;
+  function renderBase(overrideImg) {
     var v = state.view;
+    if (!v || !v.w || !v.h) return;
     var dpr = window.devicePixelRatio || 1;
-    var img = currentImage();
+    var img = overrideImg || currentImage();
+    if (!img && currentRenderedImg) {
+      // 关键防黑屏保护：若新图尚未解码完毕，绝不提前清空画板造成黑屏闪烁，保留当前画面平滑过渡
+      return;
+    }
     baseCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     baseCtx.clearRect(0, 0, v.w, v.h);
-    if (img) { setViewTransform(baseCtx); baseCtx.drawImage(img, 0, 0, v.w, v.h); }
+    if (img) {
+      setViewTransform(baseCtx);
+      baseCtx.drawImage(img, 0, 0, v.w, v.h);
+      currentRenderedImg = img;
+    } else {
+      currentRenderedImg = null;
+    }
   }
   function renderOverlay() {
     var v = state.view;
@@ -4465,7 +4490,6 @@
   /* ---- 全局与杆塔/线路精确统计瞬时刷新（耗时 < 2ms，不重建 DOM，不扰动滚动条） ---- */
 
   function refreshTreeStats() {
-    sanitizeViewedPhotos();
     if ((!state.files || state.files.length === 0) && (!state.discoveredDirs || state.discoveredDirs.length === 0)) {
       if (dirSummaryText) dirSummaryText.innerHTML = '';
       return;
@@ -4516,7 +4540,7 @@
 
     for (var i = 0; i < totalPhotos; i++) {
       var f = state.files[i];
-      var info = parseFilePrefixAndLocation(f.name, f.relPath);
+      var info = f._parsedInfo || (f._parsedInfo = parseFilePrefixAndLocation(f.name, f.relPath));
       var pfx = info.prefix;
       var twr = info.tower;
       var isViewed = isFileViewed(f);
@@ -4588,6 +4612,7 @@
     var totalTowers = 0;
     var totalFullyViewedTowers = 0;
     var totalStartedTowers = 0;
+    var fastTowersMap = new Map();
 
     for (var gi = 0; gi < groupOrder.length; gi++) {
       var pKey = groupOrder[gi];
@@ -4611,6 +4636,7 @@
 
         // 局部同步更新对应杆塔的 DOM 徽章
         var fullTwrKey = pKey + ':::' + tKey;
+        fastTowersMap.set(fullTwrKey, tObj);
         var twrEl = pathTree.querySelector('.tower-group[data-tower-key="' + fullTwrKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
         if (twrEl) {
           var twrMeta = twrEl.querySelector('.tower-meta');
@@ -4693,6 +4719,19 @@
 
     var totalLines = groupOrder.length;
 
+    // 保存统计状态，以便切图时进行 0.005ms 级增量精准更新，免全树扫描
+    state.treeStats = {
+      totalPhotos: totalPhotos,
+      totalViewedPhotos: totalViewedPhotos,
+      totalMarkedPhotos: totalMarkedPhotos,
+      totalDefects: totalDefects,
+      totalLines: totalLines,
+      totalTowers: totalTowers,
+      totalFullyViewedTowers: totalFullyViewedTowers,
+      totalStartedTowers: totalStartedTowers,
+      towersMap: fastTowersMap
+    };
+
     // 顶部统计栏
     var viewedTowerStr = totalFullyViewedTowers + '/' + totalTowers;
     if (totalStartedTowers > totalFullyViewedTowers) {
@@ -4709,6 +4748,58 @@
     if (btnFilterMarked) btnFilterMarked.textContent = '已标记 (' + totalMarkedPhotos + ')';
     if (btnFilterUnmarked) btnFilterUnmarked.textContent = '未标记 (' + (totalPhotos - totalMarkedPhotos) + ')';
     if (btnFilterUnviewed) btnFilterUnviewed.textContent = '未看 (' + (totalPhotos - totalViewedPhotos) + ')';
+  }
+
+  function updateSingleTowerViewedBadge(fullTwrKey, tObj) {
+    if (!tObj || !pathTree) return;
+    var twrEl = pathTree.querySelector('.tower-group[data-tower-key="' + fullTwrKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
+    if (!twrEl) return;
+    var vBadge = twrEl.querySelector('.tower-viewed-badge');
+    if (vBadge) {
+      if (tObj.viewedPhotos >= tObj.total && tObj.total > 0) {
+        vBadge.className = 'item-viewed-tag tower-viewed-badge';
+        vBadge.style.cssText = '';
+        vBadge.title = '该杆塔全部 ' + tObj.total + ' 张照片均已查看';
+        vBadge.textContent = '已看';
+      } else if (tObj.viewedPhotos > 0) {
+        vBadge.className = 'item-viewed-tag tower-viewed-badge';
+        vBadge.style.cssText = 'font-size:9.5px;padding:1px 4px;font-weight:600';
+        vBadge.title = '已查看该杆塔 ' + tObj.viewedPhotos + '/' + tObj.total + ' 张照片';
+        vBadge.textContent = '已看 ' + tObj.viewedPhotos + '/' + tObj.total;
+      } else {
+        vBadge.className = 'tower-viewed-badge';
+        vBadge.style.cssText = 'color:var(--muted);font-size:9.5px';
+        vBadge.textContent = '未看';
+      }
+    }
+  }
+
+  function updateTopSummaryText() {
+    if (!state.treeStats || !dirSummaryText) return;
+    var s = state.treeStats;
+    var viewedTowerStr = s.totalFullyViewedTowers + '/' + s.totalTowers;
+    if (s.totalStartedTowers > s.totalFullyViewedTowers) {
+      viewedTowerStr += ' (' + s.totalStartedTowers + '基已查)';
+    }
+    var defectSumTxt = (s.totalDefects > s.totalMarkedPhotos) ? (' (' + s.totalDefects + '处缺陷)') : '';
+    dirSummaryText.innerHTML = s.totalLines + ' 线路 · <span style="color:var(--accent);font-weight:600">已标 ' + s.totalMarkedPhotos + '/' + s.totalPhotos + defectSumTxt + '</span> · <span style="color:var(--ok);font-weight:600">已看 ' + viewedTowerStr + ' 杆塔</span>';
+    if (btnFilterUnviewed) btnFilterUnviewed.textContent = '未看 (' + (s.totalPhotos - s.totalViewedPhotos) + ')';
+  }
+
+  function updateStatsOnPhotoViewed(curFileObj) {
+    if (!curFileObj || !state.treeStats) return;
+    var info = curFileObj._parsedInfo || (curFileObj._parsedInfo = parseFilePrefixAndLocation(curFileObj.name, curFileObj.relPath));
+    var fullTwrKey = info ? (info.prefix + ':::' + info.tower) : '';
+    var s = state.treeStats;
+    s.totalViewedPhotos++;
+    var tObj = s.towersMap ? s.towersMap.get(fullTwrKey) : null;
+    if (tObj) {
+      tObj.viewedPhotos++;
+      if (tObj.viewedPhotos === 1) s.totalStartedTowers++;
+      if (tObj.viewedPhotos === tObj.total && tObj.total > 0) s.totalFullyViewedTowers++;
+      updateSingleTowerViewedBadge(fullTwrKey, tObj);
+    }
+    updateTopSummaryText();
   }
 
   /* ---- 左侧全量按线路/支线前缀分类、子文件夹杆塔统计、输出标记筛选与展开/折叠 ---- */
@@ -5058,9 +5149,12 @@
     }
 
     pathTree.innerHTML = html;
+    lastActiveTowerEl = pathTree.querySelector('.tower-group.current-tower');
+    lastActivePrefixEl = pathTree.querySelector('.prefix-group.current-group');
+    lastActiveLocItemEl = pathTree.querySelector('.loc-item.current');
 
     if (shouldScrollToActive) {
-      var curEl = pathTree.querySelector('.loc-item.current');
+      var curEl = lastActiveLocItemEl;
       if (curEl) {
         requestAnimationFrame(function () {
           curEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -5101,22 +5195,18 @@
 
     // 看到对应的塔基时自动展开，离开（看过后）自动收起
     if (targetTowerKey && targetTowerKey !== lastActiveTowerKey) {
-      var allTowers = pathTree.querySelectorAll('.tower-group');
-      for (var ti = 0; ti < allTowers.length; ti++) {
-        var tg = allTowers[ti];
-        if (tg === curTowerGroup) {
-          tg.classList.remove('collapsed');
-          tg.classList.add('current-tower');
-          if (tg.dataset.towerKey) collapsedTowers.delete(tg.dataset.towerKey);
-        } else {
-          if (!tg.classList.contains('collapsed')) {
-            tg.classList.add('collapsed');
-          }
-          tg.classList.remove('current-tower');
-          if (tg.dataset.towerKey) collapsedTowers.add(tg.dataset.towerKey);
-        }
+      if (lastActiveTowerEl && lastActiveTowerEl !== curTowerGroup) {
+        lastActiveTowerEl.classList.add('collapsed');
+        lastActiveTowerEl.classList.remove('current-tower');
+        if (lastActiveTowerEl.dataset.towerKey) collapsedTowers.add(lastActiveTowerEl.dataset.towerKey);
+      }
+      if (curTowerGroup) {
+        curTowerGroup.classList.remove('collapsed');
+        curTowerGroup.classList.add('current-tower');
+        if (curTowerGroup.dataset.towerKey) collapsedTowers.delete(curTowerGroup.dataset.towerKey);
       }
       lastActiveTowerKey = targetTowerKey;
+      lastActiveTowerEl = curTowerGroup;
     } else if (curTowerGroup) {
       if (curTowerGroup.classList.contains('collapsed')) {
         curTowerGroup.classList.remove('collapsed');
@@ -5125,26 +5215,23 @@
       if (!curTowerGroup.classList.contains('current-tower')) {
         curTowerGroup.classList.add('current-tower');
       }
+      lastActiveTowerEl = curTowerGroup;
     }
 
     // 所在线路同步联动：跨入新线路时展开，离开后收起其他线路
     if (targetPrefix && targetPrefix !== lastActivePrefix) {
-      var allGroups = pathTree.querySelectorAll('.prefix-group');
-      for (var gi = 0; gi < allGroups.length; gi++) {
-        var pg = allGroups[gi];
-        if (pg === curPrefixGroup) {
-          pg.classList.remove('collapsed');
-          pg.classList.add('current-group');
-          if (pg.dataset.prefix) collapsedGroups.delete(pg.dataset.prefix);
-        } else {
-          if (!pg.classList.contains('collapsed')) {
-            pg.classList.add('collapsed');
-          }
-          pg.classList.remove('current-group');
-          if (pg.dataset.prefix) collapsedGroups.add(pg.dataset.prefix);
-        }
+      if (lastActivePrefixEl && lastActivePrefixEl !== curPrefixGroup) {
+        lastActivePrefixEl.classList.add('collapsed');
+        lastActivePrefixEl.classList.remove('current-group');
+        if (lastActivePrefixEl.dataset.prefix) collapsedGroups.add(lastActivePrefixEl.dataset.prefix);
+      }
+      if (curPrefixGroup) {
+        curPrefixGroup.classList.remove('collapsed');
+        curPrefixGroup.classList.add('current-group');
+        if (curPrefixGroup.dataset.prefix) collapsedGroups.delete(curPrefixGroup.dataset.prefix);
       }
       lastActivePrefix = targetPrefix;
+      lastActivePrefixEl = curPrefixGroup;
     } else if (curPrefixGroup) {
       if (curPrefixGroup.classList.contains('collapsed')) {
         curPrefixGroup.classList.remove('collapsed');
@@ -5153,15 +5240,17 @@
       if (!curPrefixGroup.classList.contains('current-group')) {
         curPrefixGroup.classList.add('current-group');
       }
+      lastActivePrefixEl = curPrefixGroup;
     }
 
     // 1. 取消先前的选中高亮与箭头
-    var prevEl = pathTree.querySelector('.loc-item.current');
+    var prevEl = lastActiveLocItemEl || pathTree.querySelector('.loc-item.current');
     if (prevEl && prevEl !== targetEl) {
       prevEl.classList.remove('current');
       var oldArrow = prevEl.querySelector('.loc-current-arrow');
       if (oldArrow) oldArrow.remove();
     }
+    lastActiveLocItemEl = targetEl;
 
     // 2. 激活新项的高亮与箭头
     targetEl.classList.add('current');
@@ -5191,12 +5280,9 @@
       badges.appendChild(viewedTag);
     }
 
-    if (isNewView) {
-      if (filterMode === 'unviewed') {
-        renderPathTree(true);
-        return;
-      }
-      scheduleRefreshTreeStats();
+    if (isNewView && filterMode === 'unviewed') {
+      renderPathTree(true);
+      return;
     }
 
     // 4. 滚动定位（若目标已在视野舒适区则不触发扰动滚动，边缘时平滑跟进）
