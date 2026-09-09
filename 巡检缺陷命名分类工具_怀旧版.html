@@ -1882,7 +1882,7 @@
   var IMG_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'];
   var strokeWidth = 10;
   var MIN_ZOOM = 0.1, MAX_ZOOM = 10, HANDLE_PX = 8;
-  var CACHE_LIMIT = 100;
+  var CACHE_LIMIT = 14;
 
   var KEY_THEME = 'xunjian_theme';
   var KEY_NO_PROMPT = 'xunjian_no_prompt';
@@ -2589,8 +2589,10 @@
     if (state.index >= 0) {
       var key = curKey();
       var c = key ? state.cache.get(key) : null;
-      if (c && c.img && c.img.naturalWidth > 0) {
-        var fit = computeFit(c.img.naturalWidth, c.img.naturalHeight);
+      if (c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0))) {
+        var nw = c.img.naturalWidth || c.img.width;
+        var nh = c.img.naturalHeight || c.img.height;
+        var fit = computeFit(nw, nh);
         fitView(fit.w, fit.h, fit.s);
         render();
       }
@@ -3080,15 +3082,47 @@
     switchTo(0);
   }
 
-  function clearCache() {
-    state.cache.forEach(function (c) {
-      try { if (c.url) URL.revokeObjectURL(c.url); } catch (e) {}
-      if (c.img) c.img.src = '';
-    });
-    state.cache.clear();
+  function disposeCacheItem(c) {
+    if (!c) return;
+    try {
+      if (c.img && typeof c.img.close === 'function') {
+        c.img.close();
+      }
+    } catch (e) {}
+    try {
+      if (c.url) URL.revokeObjectURL(c.url);
+    } catch (e) {}
+    if (c.img && c.img.tagName === 'IMG') {
+      c.img.src = '';
+    }
   }
 
-  /* ================= 图片加载 / 缓存 ================= */
+  function clearCache() {
+    state.cache.forEach(function (c) {
+      disposeCacheItem(c);
+    });
+    state.cache.clear();
+    preloadQueue = [];
+    preloadGeneration++;
+  }
+
+  /* ================= 图片加载 / 缓存与硬件级预解码引擎 ================= */
+
+  // 浏览器兼容性图片解码器：优先原生硬件级后台解码 createImageBitmap，回退标准 HTMLImageElement
+  async function decodeImageSource(blob, url) {
+    if (typeof createImageBitmap === 'function') {
+      try {
+        var bmp = await createImageBitmap(blob);
+        bmp.naturalWidth = bmp.width;
+        bmp.naturalHeight = bmp.height;
+        bmp.complete = true;
+        return bmp;
+      } catch (bmpErr) {
+        console.warn('createImageBitmap 硬件解码受阻，自动回退至常规 Image 解码:', bmpErr);
+      }
+    }
+    return await loadImageElement(url);
+  }
 
   function loadImageElement(url) {
     var img = new Image();
@@ -3096,12 +3130,18 @@
     img.src = url;
     if (img.decode) {
       return img.decode().then(function () {
+        img.naturalWidth = img.naturalWidth || img.width;
+        img.naturalHeight = img.naturalHeight || img.height;
         return img;
       }).catch(function () {
         return new Promise(function (resolve, reject) {
           if (img.complete && img.naturalWidth > 0) resolve(img);
           else {
-            img.onload = function () { resolve(img); };
+            img.onload = function () {
+              img.naturalWidth = img.naturalWidth || img.width;
+              img.naturalHeight = img.naturalHeight || img.height;
+              resolve(img);
+            };
             img.onerror = function () { reject(new Error('图片加载失败')); };
           }
         });
@@ -3110,7 +3150,11 @@
     return new Promise(function (resolve, reject) {
       if (img.complete && img.naturalWidth > 0) resolve(img);
       else {
-        img.onload = function () { resolve(img); };
+        img.onload = function () {
+          img.naturalWidth = img.naturalWidth || img.width;
+          img.naturalHeight = img.naturalHeight || img.height;
+          resolve(img);
+        };
         img.onerror = function () { reject(new Error('图片加载失败')); };
       }
     });
@@ -3126,11 +3170,14 @@
     var c = state.cache.get(key);
     var isMarked = !preferClean && !!(state.markedFiles && state.markedFiles.has(key)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(key));
 
-    if (c && c.img && c.img.naturalWidth > 0 && c.img.complete) {
+    var isCachedValid = c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0)) && (c.img.complete !== false);
+    if (isCachedValid) {
       if (isMarked && !c.isBoxed) {
-        try { if (c.url) URL.revokeObjectURL(c.url); } catch (e) {}
+        disposeCacheItem(c);
+        state.cache.delete(key);
       } else if (!isMarked && c.isBoxed) {
-        try { if (c.url) URL.revokeObjectURL(c.url); } catch (e) {}
+        disposeCacheItem(c);
+        state.cache.delete(key);
       } else {
         return c;
       }
@@ -3143,14 +3190,14 @@
 
     var loadPromise = (async function () {
       try {
+        var blob = null;
         var url = null;
         var isBoxedImg = false;
         if (isMarked) {
           try {
             var boxedHandle = state.markedBoxedHandles.get(key);
             if (boxedHandle) {
-              var boxedFile = await boxedHandle.getFile();
-              url = URL.createObjectURL(boxedFile);
+              blob = await boxedHandle.getFile();
               isBoxedImg = true;
             }
           } catch (err) {
@@ -3158,19 +3205,26 @@
           }
         }
 
-        if (!url) {
+        if (!blob) {
           if (f.file) {
-            url = URL.createObjectURL(f.file);
+            blob = f.file;
           } else {
-            var file = await f.handle.getFile();
-            url = URL.createObjectURL(file);
+            blob = await f.handle.getFile();
           }
         }
 
-        var img = await loadImageElement(url);
+        url = URL.createObjectURL(blob);
+        var img = await decodeImageSource(blob, url);
+        var nw = img.naturalWidth || img.width;
+        var nh = img.naturalHeight || img.height;
+
         c = {
           url: url,
           img: img,
+          width: nw,
+          height: nh,
+          naturalWidth: nw,
+          naturalHeight: nh,
           origName: f.name,
           relPath: f.relPath,
           key: key,
@@ -3187,6 +3241,7 @@
     inFlightImagePromises.set(inFlightKey, loadPromise);
     return loadPromise;
   }
+
   function evictLRU(cur) {
     if (state.cache.size <= CACHE_LIMIT) return;
     var currentKey = curKey();
@@ -3201,82 +3256,100 @@
       var k = keys[i];
       if (k === currentKey) continue;
       var c = state.cache.get(k);
-      if (c && c.url) {
-        try { URL.revokeObjectURL(c.url); } catch (e) {}
-      }
+      disposeCacheItem(c);
       state.cache.delete(k);
     }
   }
+
   function preload(index) {
     if (index < 0 || !state.files || index >= state.files.length) return;
-    getImage(index).catch(function () {});
+    schedulePreloadAhead(index);
   }
 
-  /* ================= 极速双向智能预加载引擎（并发后台预解码，0延迟切图） ================= */
+  /* ================= 极速双向智能预加载引擎（并发限流调度 + 优先级抢占） ================= */
+
+  var preloadQueue = [];
+  var activePreloadCount = 0;
+  var MAX_CONCURRENT_PRELOAD = 2; // 控制在 2 个并发后台解码，避免打满 I/O 与工作线程
+  var preloadGeneration = 0; // 换代计数器：当目标发生大幅改变时，立即作废旧代任务
 
   function schedulePreload(curIdx) {
-    preloadAhead(curIdx);
+    schedulePreloadAhead(curIdx);
   }
 
-  function preloadAhead(curIdx) {
+  function schedulePreloadAhead(curIdx) {
     if (!state.files || state.files.length === 0 || curIdx < 0) return;
+    preloadGeneration++;
+    var thisGen = preloadGeneration;
 
     var targets = [];
     var seen = new Set();
     seen.add(curIdx);
 
-    // 1. 向前深度预加载 8 张（切图主方向，并发后台解码，实现丝滑秒切）
+    // 1. 向前预测 7 张（切图主方向，优先级最高）
     var fwd = curIdx;
-    for (var i = 0; i < 8; i++) {
+    for (var i = 0; i < 7; i++) {
       var next = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(fwd, 1) : (fwd + 1);
       if (next >= 0 && next < state.files.length && !seen.has(next)) {
         seen.add(next);
-        targets.push(next);
+        targets.push({ idx: next, priority: 10 - i });
         fwd = next;
       } else {
         break;
       }
     }
 
-    // 2. 向后预加载 4 张（满足随时倒退回看需求）
+    // 2. 向后缓冲 3 张（倒退回看缓冲）
     var bwd = curIdx;
-    for (var j = 0; j < 4; j++) {
+    for (var j = 0; j < 3; j++) {
       var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(bwd, -1) : (bwd - 1);
       if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
         seen.add(prev);
-        targets.push(prev);
+        targets.push({ idx: prev, priority: 5 - j });
         bwd = prev;
       } else {
         break;
       }
     }
 
-    // 3. 补充自然物理序列邻近项
-    var rawNeighbors = [curIdx + 1, curIdx + 2, curIdx - 1, curIdx - 2];
-    for (var k = 0; k < rawNeighbors.length; k++) {
-      var rIdx = rawNeighbors[k];
-      if (rIdx >= 0 && rIdx < state.files.length && !seen.has(rIdx)) {
-        seen.add(rIdx);
-        targets.push(rIdx);
+    // 过滤掉已处于有效缓存中的目标
+    var pendingItems = [];
+    for (var k = 0; k < targets.length; k++) {
+      var tIdx = targets[k].idx;
+      var f = state.files[tIdx];
+      if (!f) continue;
+      var key = fileKey(f);
+      var c = state.cache ? state.cache.get(key) : null;
+      var isMarked = !!(state.markedFiles && state.markedFiles.has(key)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(key));
+      var isCachedValid = c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0)) && (isMarked === c.isBoxed);
+      if (!isCachedValid) {
+        pendingItems.push(targets[k]);
       }
     }
 
-    // 过滤掉已处于有效缓存中的目标
-    var needed = targets.filter(function (idx) {
-      var f = state.files[idx];
-      if (!f) return false;
-      var key = fileKey(f);
-      var c = state.cache ? state.cache.get(key) : null;
-      if (!c || !c.img || !c.img.complete || c.img.naturalWidth <= 0) return true;
-      var isMarked = !!(state.markedFiles && state.markedFiles.has(key)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(key));
-      return isMarked !== c.isBoxed;
+    // 按优先级从高到低排列
+    pendingItems.sort(function (a, b) { return b.priority - a.priority; });
+    preloadQueue = pendingItems.map(function (item) { return item.idx; });
+
+    processPreloadQueue(thisGen);
+  }
+
+  function processPreloadQueue(gen) {
+    if (gen !== preloadGeneration) return;
+    if (activePreloadCount >= MAX_CONCURRENT_PRELOAD || preloadQueue.length === 0) return;
+
+    var nextIdx = preloadQueue.shift();
+    activePreloadCount++;
+
+    getImage(nextIdx).catch(function () {}).finally(function () {
+      activePreloadCount--;
+      if (gen === preloadGeneration) {
+        processPreloadQueue(gen);
+      }
     });
 
-    // 并发后台异步解码（不占主线程微任务）
-    for (var m = 0; m < needed.length; m++) {
-      (function (tIdx) {
-        getImage(tIdx).catch(function () {});
-      })(needed[m]);
+    if (activePreloadCount < MAX_CONCURRENT_PRELOAD && preloadQueue.length > 0) {
+      processPreloadQueue(gen);
     }
   }
 
@@ -3334,7 +3407,7 @@
     if (!f) return null;
     var key = fileKey(f);
     var c = state.cache.get(key);
-    if (c && c.img && c.img.naturalWidth > 0 && c.img.complete) return c.img;
+    if (c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0)) && (c.img.complete !== false)) return c.img;
     return null;
   }
   function setViewTransform(ctx) {
@@ -5877,16 +5950,50 @@
     btnBackToCurrent.addEventListener('click', scrollToLastViewedPhoto);
   }
 
+  /* ================= 极速图片切换引擎（0 延迟即时响应 + 渲染解耦） ================= */
+
+  var navTargetIndex = -1;
+  var deferredUpdateTimer = null;
+  var switchGeneration = 0;
+  var loadingDebounceTimer = null;
+
+  function updateHudLightweight(index) {
+    if (index < 0 || !state.files || !state.files[index]) return;
+    var f = state.files[index];
+    if (filterMode !== 'all') {
+      ensureFilterList();
+      var filterCount = cachedFilteredList.length;
+      var filterPos = cachedFilteredPosMap.has(index) ? (cachedFilteredPosMap.get(index) + 1) : 0;
+      var filterNames = { marked: '已标记', unmarked: '未标记', unviewed: '未看' };
+      var fLabel = filterNames[filterMode] || '筛选';
+      counter.textContent = (filterPos > 0 ? filterPos : '—') + ' / ' + filterCount + ' [' + fLabel + ']';
+    } else {
+      counter.textContent = (index + 1) + ' / ' + state.files.length;
+    }
+    var parsed = parseFilePrefixAndLocation(f.name, f.relPath);
+    groupTag.textContent = '【' + parsed.prefix + ' · ' + parsed.tower + '】';
+    filenameEl.textContent = f.name;
+    filenameEl.title = f.relPath || f.name;
+  }
+
+  function scheduleDeferredAuxiliaryUpdates(index) {
+    if (deferredUpdateTimer) clearTimeout(deferredUpdateTimer);
+    deferredUpdateTimer = setTimeout(function () {
+      deferredUpdateTimer = null;
+      if (index === state.index) {
+        updateHud();
+        renderSide();
+        updatePathTreeSelection(index, true);
+      }
+    }, 70);
+  }
+
   async function switchTo(index, force) {
     if (index < 0 || !state.files || index >= state.files.length) return;
-    if (state.navBusy) {
-      state.pendingSwitchIndex = index;
-      return;
-    }
-    if (index === state.index && !force) return;
+    navTargetIndex = index;
 
     // 核心功能：当切图片时若当前图片已圈示红框但尚未保存，提醒用户
-    if (!force && state.index >= 0 && state.files[state.index]) {
+    if (!force && state.index >= 0 && state.files[state.index] && state.index !== index) {
       var curPhoto = state.files[state.index];
       var curM = getMeta(curPhoto.name);
       var hasUnsavedBoxes = curM && curM.boxes && curM.boxes.length > 0 && !curM.saved;
@@ -5895,76 +6002,92 @@
           '未保存提醒',
           '当前图片【' + curPhoto.name + '】已圈示 ' + curM.boxes.length + ' 处红框但尚未保存输出。\n\n直接切换将放弃未保存的圈示，确定要切换吗？'
         );
-        if (!ok) return;
+        if (!ok) {
+          navTargetIndex = state.index;
+          return;
+        }
       }
     }
 
-    state.navBusy = true;
+    if (index === state.index && !force) return;
+
+    switchGeneration++;
+    var thisSwitchGen = switchGeneration;
+
+    state.index = index;
+    selectedIndex = -1;
+
+    var curF = state.files[index];
+    var isNewlyViewed = false;
+    var curKeyForView = fileKey(curF);
+    if (curKeyForView && !viewedPhotosMap[curKeyForView]) {
+      viewedPhotosMap[curKeyForView] = true;
+      isNewlyViewed = true;
+      saveViewedPhotos();
+    }
+
+    if (isNewlyViewed) {
+      invalidateFilterList();
+    }
+
+    // 0ms 即时轻量更新 HUD（数字与文件名秒变，杜绝任何卡滞感）
+    updateHudLightweight(index);
+
+    // 核心优化：优先从显存预解码缓存中直出画面（第 0 帧瞬时上屏，绝对零卡顿零白屏）
+    var curFKey = fileKey(curF);
+    var cached = state.cache.get(curFKey);
+    var isMarked = !!(state.markedFiles && state.markedFiles.has(curFKey)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(curFKey));
+    var isCacheValid = cached && cached.img && ((cached.img.naturalWidth > 0) || (cached.img.width > 0)) && (cached.img.complete !== false) && (isMarked ? cached.isBoxed : !cached.isBoxed);
+
+    if (isCacheValid) {
+      clearTimeout(loadingDebounceTimer);
+      if (loadingEl) loadingEl.style.display = 'none';
+
+      var nw = cached.img.naturalWidth || cached.img.width;
+      var nh = cached.img.naturalHeight || cached.img.height;
+      state.natural = { w: nw, h: nh };
+      var fit = computeFit(nw, nh);
+      fitView(fit.w, fit.h, fit.s);
+      render();
+
+      schedulePreloadAhead(index);
+      scheduleDeferredAuxiliaryUpdates(index);
+      return;
+    }
+
+    // 未命中缓存：防抖 100ms 显示加载指示器，启动并发安全异步加载
+    clearTimeout(loadingDebounceTimer);
+    loadingDebounceTimer = setTimeout(function () {
+      if (thisSwitchGen === switchGeneration && loadingEl) {
+        loadingEl.style.display = '';
+      }
+    }, 100);
+
     try {
-      state.index = index;
-      selectedIndex = -1;
-
-      var curF = state.files[index];
-      var isNewlyViewed = false;
-      var curKeyForView = fileKey(curF);
-      if (curKeyForView && !viewedPhotosMap[curKeyForView]) {
-        viewedPhotosMap[curKeyForView] = true;
-        isNewlyViewed = true;
-        saveViewedPhotos();
+      var c = await getImage(index);
+      if (thisSwitchGen !== switchGeneration) {
+        // 加载期间用户已快速切到新图，丢弃旧帧避免抢占最新画面
+        return;
       }
+      clearTimeout(loadingDebounceTimer);
+      if (loadingEl) loadingEl.style.display = 'none';
 
-      if (isNewlyViewed) {
-        invalidateFilterList();
-      }
-
-      // 核心优化：优先绘制画布主图（第 0 帧瞬时上屏，绝对零卡顿零白屏）
-      var curFKey = fileKey(curF);
-      var cached = state.cache.get(curFKey);
-      var isMarked = !!(state.markedFiles && state.markedFiles.has(curFKey)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(curFKey));
-      var isCacheValid = cached && cached.img && cached.img.naturalWidth > 0 && cached.img.complete && (isMarked ? cached.isBoxed : !cached.isBoxed);
-
-      if (isCacheValid) {
-        clearTimeout(loadingDebounceTimer);
-        if (loadingEl) loadingEl.style.display = 'none';
-        state.natural = { w: cached.img.naturalWidth, h: cached.img.naturalHeight };
-        var fit = computeFit(cached.img.naturalWidth, cached.img.naturalHeight);
-        fitView(fit.w, fit.h, fit.s);
+      if (c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0))) {
+        var cnw = c.img.naturalWidth || c.img.width;
+        var cnh = c.img.naturalHeight || c.img.height;
+        state.natural = { w: cnw, h: cnh };
+        var fit2 = computeFit(cnw, cnh);
+        fitView(fit2.w, fit2.h, fit2.s);
         render();
-        preloadAhead(index);
-      } else {
-        clearTimeout(loadingDebounceTimer);
-        loadingDebounceTimer = setTimeout(function () {
-          if (loadingEl) loadingEl.style.display = '';
-        }, 100);
-        var c = await getImage(index);
-        clearTimeout(loadingDebounceTimer);
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (c && c.img && c.img.naturalWidth > 0) {
-          state.natural = { w: c.img.naturalWidth, h: c.img.naturalHeight };
-          var fit2 = computeFit(c.img.naturalWidth, c.img.naturalHeight);
-          fitView(fit2.w, fit2.h, fit2.s);
-          render();
-        }
-        preloadAhead(index);
       }
 
-      // 画面秒出后，更新周边辅助信息与左侧树选中
-      updateHud();
-      renderSide();
-      updatePathTreeSelection(index, true);
+      schedulePreloadAhead(index);
+      scheduleDeferredAuxiliaryUpdates(index);
     } catch (err) {
+      if (thisSwitchGen !== switchGeneration) return;
       clearTimeout(loadingDebounceTimer);
       if (loadingEl) loadingEl.style.display = 'none';
       toast('加载失败：' + (err && err.message || err));
-    } finally {
-      state.navBusy = false;
-      if (state.pendingSwitchIndex !== null && state.pendingSwitchIndex !== undefined) {
-        var pIdx = state.pendingSwitchIndex;
-        state.pendingSwitchIndex = null;
-        if (pIdx !== state.index) {
-          switchTo(pIdx);
-        }
-      }
     }
   }
 
@@ -7753,8 +7876,9 @@
 
   function composite(img, mime, boxes) {
     return new Promise(function (resolve, reject) {
-      var cv = document.createElement('canvas');
-      cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      var nw = img.naturalWidth || img.width;
+      var nh = img.naturalHeight || img.height;
+      cv.width = nw; cv.height = nh;
       var ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0);
       if (boxes && boxes.length) {
@@ -8647,8 +8771,10 @@
   }
 
   function navNext() {
-    var nextIdx = getNextFilteredIndex(state.index, 1);
+    var baseIdx = (navTargetIndex >= 0) ? navTargetIndex : state.index;
+    var nextIdx = getNextFilteredIndex(baseIdx, 1);
     if (nextIdx >= 0) {
+      navTargetIndex = nextIdx;
       switchTo(nextIdx);
     } else {
       var msg = (filterMode === 'all') ? '已是最后一张照片' :
@@ -8659,8 +8785,10 @@
   }
 
   function navPrev() {
-    var prevIdx = getNextFilteredIndex(state.index, -1);
+    var baseIdx = (navTargetIndex >= 0) ? navTargetIndex : state.index;
+    var prevIdx = getNextFilteredIndex(baseIdx, -1);
     if (prevIdx >= 0) {
+      navTargetIndex = prevIdx;
       switchTo(prevIdx);
     } else {
       var msg = (filterMode === 'all') ? '已是第一张照片' :
