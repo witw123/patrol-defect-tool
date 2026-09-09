@@ -3113,9 +3113,6 @@
     if (typeof createImageBitmap === 'function') {
       try {
         var bmp = await createImageBitmap(blob);
-        bmp.naturalWidth = bmp.width;
-        bmp.naturalHeight = bmp.height;
-        bmp.complete = true;
         return bmp;
       } catch (bmpErr) {
         console.warn('createImageBitmap 硬件解码受阻，自动回退至常规 Image 解码:', bmpErr);
@@ -3125,37 +3122,33 @@
   }
 
   function loadImageElement(url) {
-    var img = new Image();
-    img.decoding = 'async';
-    img.src = url;
-    if (img.decode) {
-      return img.decode().then(function () {
-        img.naturalWidth = img.naturalWidth || img.width;
-        img.naturalHeight = img.naturalHeight || img.height;
-        return img;
-      }).catch(function () {
-        return new Promise(function (resolve, reject) {
-          if (img.complete && img.naturalWidth > 0) resolve(img);
-          else {
-            img.onload = function () {
-              img.naturalWidth = img.naturalWidth || img.width;
-              img.naturalHeight = img.naturalHeight || img.height;
-              resolve(img);
-            };
-            img.onerror = function () { reject(new Error('图片加载失败')); };
-          }
-        });
-      });
-    }
     return new Promise(function (resolve, reject) {
-      if (img.complete && img.naturalWidth > 0) resolve(img);
-      else {
-        img.onload = function () {
-          img.naturalWidth = img.naturalWidth || img.width;
-          img.naturalHeight = img.naturalHeight || img.height;
-          resolve(img);
-        };
-        img.onerror = function () { reject(new Error('图片加载失败')); };
+      var img = new Image();
+      img.decoding = 'async';
+      var settled = false;
+
+      function onOk() {
+        if (settled) return;
+        settled = true;
+        resolve(img);
+      }
+      function onErr() {
+        if (settled) return;
+        settled = true;
+        reject(new Error('图片加载失败'));
+      }
+
+      img.onload = onOk;
+      img.onerror = onErr;
+      img.src = url;
+
+      if (img.decode) {
+        img.decode().then(onOk).catch(function () {
+          // 若异步 decode 失败，等待 onload / onerror
+        });
+      }
+      if (img.complete && ((img.naturalWidth > 0) || (img.width > 0))) {
+        onOk();
       }
     });
   }
@@ -5956,6 +5949,7 @@
   var deferredUpdateTimer = null;
   var switchGeneration = 0;
   var loadingDebounceTimer = null;
+  var isHoldScrubbing = false;
 
   function updateHudLightweight(index) {
     if (index < 0 || !state.files || !state.files[index]) return;
@@ -6050,8 +6044,15 @@
       fitView(fit.w, fit.h, fit.s);
       render();
 
-      schedulePreloadAhead(index);
-      scheduleDeferredAuxiliaryUpdates(index);
+      if (!isHoldScrubbing) {
+        schedulePreloadAhead(index);
+        scheduleDeferredAuxiliaryUpdates(index);
+      }
+      return;
+    }
+
+    if (isHoldScrubbing) {
+      // 处于长按极速连切中：中间未命中缓存的帧跳过慢速磁盘I/O，当松手或停下时再加载
       return;
     }
 
@@ -6089,6 +6090,50 @@
       if (loadingEl) loadingEl.style.display = 'none';
       toast('加载失败：' + (err && err.message || err));
     }
+  }
+
+  async function ensurePhotoFullyLoaded(index) {
+    if (index < 0 || !state.files || index >= state.files.length) return;
+    var thisSwitchGen = switchGeneration;
+    var curF = state.files[index];
+    var curFKey = fileKey(curF);
+    var cached = state.cache.get(curFKey);
+    var isMarked = !!(state.markedFiles && state.markedFiles.has(curFKey)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(curFKey));
+    var isCacheValid = cached && cached.img && ((cached.img.naturalWidth > 0) || (cached.img.width > 0)) && (cached.img.complete !== false) && (isMarked ? cached.isBoxed : !cached.isBoxed);
+
+    if (isCacheValid) {
+      if (loadingEl) loadingEl.style.display = 'none';
+      var nw = cached.img.naturalWidth || cached.img.width;
+      var nh = cached.img.naturalHeight || cached.img.height;
+      state.natural = { w: nw, h: nh };
+      var fit = computeFit(nw, nh);
+      fitView(fit.w, fit.h, fit.s);
+      render();
+    } else {
+      if (loadingEl) loadingEl.style.display = '';
+      try {
+        var c = await getImage(index);
+        if (thisSwitchGen !== switchGeneration) return;
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0))) {
+          var cnw = c.img.naturalWidth || c.img.width;
+          var cnh = c.img.naturalHeight || c.img.height;
+          state.natural = { w: cnw, h: cnh };
+          var fit2 = computeFit(cnw, cnh);
+          fitView(fit2.w, fit2.h, fit2.s);
+          render();
+        }
+      } catch (err) {
+        if (thisSwitchGen !== switchGeneration) return;
+        if (loadingEl) loadingEl.style.display = 'none';
+        toast('加载失败：' + (err && err.message || err));
+      }
+    }
+
+    schedulePreloadAhead(index);
+    updateHud();
+    renderSide();
+    updatePathTreeSelection(index, true);
   }
 
   /* ================= 候选分类池（可增删改）核心方法 ================= */
@@ -7830,7 +7875,18 @@
 
   function ensureOutputDir() {
     return new Promise(async function (resolve) {
-      if (output.mainHandle) { resolve(true); return; }
+      if (output.mainHandle) {
+        try {
+          var status0 = await output.mainHandle.queryPermission({ mode: 'readwrite' });
+          if (status0 !== 'granted') {
+            status0 = await output.mainHandle.requestPermission({ mode: 'readwrite' });
+          }
+          if (status0 === 'granted') {
+            resolve(true);
+            return;
+          }
+        } catch (e) {}
+      }
 
       // 优先尝试恢复记忆的输出目录
       if (lastOutputHandle) {
@@ -7876,9 +7932,19 @@
 
   function composite(img, mime, boxes) {
     return new Promise(function (resolve, reject) {
-      var nw = img.naturalWidth || img.width;
-      var nh = img.naturalHeight || img.height;
-      cv.width = nw; cv.height = nh;
+      if (!img) {
+        reject(new Error('未提供有效的源图片'));
+        return;
+      }
+      var cv = document.createElement('canvas');
+      var nw = img.naturalWidth || img.width || 0;
+      var nh = img.naturalHeight || img.height || 0;
+      if (!nw || !nh) {
+        reject(new Error('源图片尺寸无效(' + nw + 'x' + nh + ')'));
+        return;
+      }
+      cv.width = nw;
+      cv.height = nh;
       var ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0);
       if (boxes && boxes.length) {
@@ -7887,8 +7953,12 @@
         ctx.lineJoin = 'miter';
         for (var i = 0; i < boxes.length; i++) ctx.strokeRect(boxes[i].x, boxes[i].y, boxes[i].w, boxes[i].h);
       }
-      var quality = mime === 'image/jpeg' ? 0.95 : undefined;
-      cv.toBlob(function (blob) { if (blob) resolve(blob); else reject(new Error('导出图片失败')); }, mime, quality);
+      var exportMime = (mime === 'image/png') ? 'image/png' : 'image/jpeg';
+      var quality = (exportMime === 'image/jpeg') ? 0.95 : undefined;
+      cv.toBlob(function (blob) {
+        if (blob) resolve(blob);
+        else reject(new Error('导出图片失败：Canvas生成Blob为空'));
+      }, exportMime, quality);
     });
   }
 
@@ -8042,7 +8112,6 @@
       var cleanBlob = f.file || await f.handle.getFile();
       var cleanUrl = URL.createObjectURL(cleanBlob);
       var cleanImg = await loadImageElement(cleanUrl);
-      try { URL.revokeObjectURL(cleanUrl); } catch (e) {}
 
       // 核心支持：若在已标圈示图上继续圈示，底图以现有的圈示图为基底叠加新绘制的红框，并直接覆盖保存
       var baseImgForComposite = (isBoxedImg && c && c.img) ? c.img : cleanImg;
@@ -8055,6 +8124,7 @@
       } else {
         boxedBlob = cleanBlob;
       }
+      try { URL.revokeObjectURL(cleanUrl); } catch (e) {}
 
       var [targetBoxed, targetOrig] = await Promise.all([
         subBoxedFolderHandle.getFileHandle(outFileName, { create: true }),
@@ -8198,7 +8268,6 @@
       var cleanBlob = f.file || await f.handle.getFile();
       var cleanUrl = URL.createObjectURL(cleanBlob);
       var cleanImg = await loadImageElement(cleanUrl);
-      try { URL.revokeObjectURL(cleanUrl); } catch (e) {}
 
       var baseImgForComposite = (isBoxedImg && c && c.img) ? c.img : cleanImg;
 
@@ -8210,6 +8279,7 @@
       } else {
         boxedBlob = cleanBlob;
       }
+      try { URL.revokeObjectURL(cleanUrl); } catch (e) {}
 
       var targetCritical = await criticalFolderHandle.getFileHandle(outFileName, { create: true });
       var w = await targetCritical.createWritable();
@@ -8770,32 +8840,88 @@
     });
   }
 
-  function navNext() {
+  /* ================= 长按极速连切引擎（Hold-to-Fast-Scrub Engine） ================= */
+  var holdNavTimer = null;
+  var holdInitialTimer = null;
+  var activeHoldKey = null; // 'left' | 'right' | null
+  var scrubTickCount = 0;
+
+  function stepSwitch(dir) {
     var baseIdx = (navTargetIndex >= 0) ? navTargetIndex : state.index;
-    var nextIdx = getNextFilteredIndex(baseIdx, 1);
+    var nextIdx = getNextFilteredIndex(baseIdx, dir);
     if (nextIdx >= 0) {
       navTargetIndex = nextIdx;
       switchTo(nextIdx);
+      return true;
     } else {
-      var msg = (filterMode === 'all') ? '已是最后一张照片' :
-                (filterMode === 'marked' ? '已是最后一张已标记照片' :
-                (filterMode === 'unmarked' ? '已是最后一张未标记照片' : '已是最后一张未看照片'));
-      toast(msg);
+      if (!isHoldScrubbing) {
+        var msg = (filterMode === 'all') ? (dir > 0 ? '已是最后一张照片' : '已是第一张照片') :
+                  (filterMode === 'marked' ? (dir > 0 ? '已是最后一张已标记照片' : '已是第一张已标记照片') :
+                  (filterMode === 'unmarked' ? (dir > 0 ? '已是最后一张未标记照片' : '已是第一张未标记照片') :
+                  (dir > 0 ? '已是最后一张未看照片' : '已是第一张未看照片')));
+        toast(msg);
+      }
+      return false;
     }
   }
 
-  function navPrev() {
-    var baseIdx = (navTargetIndex >= 0) ? navTargetIndex : state.index;
-    var prevIdx = getNextFilteredIndex(baseIdx, -1);
-    if (prevIdx >= 0) {
-      navTargetIndex = prevIdx;
-      switchTo(prevIdx);
-    } else {
-      var msg = (filterMode === 'all') ? '已是第一张照片' :
-                (filterMode === 'marked' ? '已是第一张已标记照片' :
-                (filterMode === 'unmarked' ? '已是第一张未标记照片' : '已是第一张未看照片'));
-      toast(msg);
+  function startHoldScrub(direction) {
+    var targetKeyType = direction > 0 ? 'right' : 'left';
+    if (activeHoldKey === targetKeyType) return;
+    if (activeHoldKey !== null) stopHoldScrub();
+
+    activeHoldKey = targetKeyType;
+    scrubTickCount = 0;
+
+    // 立即执行第 1 次切换（0ms 即点即切）
+    var moved = stepSwitch(direction);
+    if (!moved) {
+      activeHoldKey = null;
+      return;
     }
+
+    // 按下超过 180ms 自动转入连续极速飞切
+    holdInitialTimer = setTimeout(function () {
+      holdInitialTimer = null;
+      if (activeHoldKey === null) return;
+      isHoldScrubbing = true;
+
+      function scrubTick() {
+        if (activeHoldKey === null) return;
+        var dir = (activeHoldKey === 'right') ? 1 : -1;
+        var ok = stepSwitch(dir);
+        if (ok) {
+          scrubTickCount++;
+          var delay = (scrubTickCount < 3) ? 80 : 55;
+          holdNavTimer = setTimeout(scrubTick, delay);
+        } else {
+          stopHoldScrub();
+        }
+      }
+      scrubTick();
+    }, 180);
+  }
+
+  function stopHoldScrub() {
+    var wasHolding = (activeHoldKey !== null || isHoldScrubbing);
+    isHoldScrubbing = false;
+    activeHoldKey = null;
+    scrubTickCount = 0;
+
+    if (holdInitialTimer) { clearTimeout(holdInitialTimer); holdInitialTimer = null; }
+    if (holdNavTimer) { clearTimeout(holdNavTimer); holdNavTimer = null; }
+
+    if (wasHolding && state.index >= 0) {
+      ensurePhotoFullyLoaded(state.index);
+    }
+  }
+
+  function navNext() {
+    stepSwitch(1);
+  }
+
+  function navPrev() {
+    stepSwitch(-1);
   }
 
   btnPrev.addEventListener('click', navPrev);
@@ -8841,6 +8967,21 @@
     var isInput = (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable));
     var hasActiveModal = !!document.querySelector('.overlay.show');
 
+    var isLeftKey = (e.key === 'ArrowLeft' || ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.altKey && !e.metaKey));
+    var isRightKey = (e.key === 'ArrowRight' || ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.altKey && !e.metaKey));
+
+    if ((isLeftKey || isRightKey) && !isInput && !hasActiveModal) {
+      e.preventDefault();
+      var dir = isRightKey ? 1 : -1;
+      var targetKeyType = isRightKey ? 'right' : 'left';
+      if (activeHoldKey === targetKeyType) {
+        // 浏览器原生按键重复事件由内部定时器托管
+        return;
+      }
+      startHoldScrub(dir);
+      return;
+    }
+
     if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput && !hasActiveModal) {
       if (selectedIndex >= 0) {
         e.preventDefault();
@@ -8856,16 +8997,27 @@
     } else if (e.ctrlKey && (e.key === 'z' || e.key === 'Z') && !isInput && !hasActiveModal) {
       e.preventDefault();
       undoLastAction();
-    } else if ((e.key === 'ArrowLeft' || ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.altKey && !e.metaKey)) && !isInput && !hasActiveModal) {
-      e.preventDefault();
-      navPrev();
-    } else if ((e.key === 'ArrowRight' || ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.altKey && !e.metaKey)) && !isInput && !hasActiveModal) {
-      e.preventDefault();
-      navNext();
     } else if ((e.key === 'c' || e.key === 'C') && !isInput && !hasActiveModal && !e.ctrlKey && !e.altKey && !e.metaKey) {
       e.preventDefault();
       scrollToLastViewedPhoto();
     }
+  });
+
+  window.addEventListener('keyup', function (e) {
+    var isLeftKey = (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A');
+    var isRightKey = (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D');
+    if (isLeftKey && activeHoldKey === 'left') {
+      stopHoldScrub();
+    } else if (isRightKey && activeHoldKey === 'right') {
+      stopHoldScrub();
+    }
+  });
+
+  window.addEventListener('blur', function () {
+    stopHoldScrub();
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stopHoldScrub();
   });
 
   btnSettings.addEventListener('click', function () { settingsPanel.classList.toggle('show'); });
