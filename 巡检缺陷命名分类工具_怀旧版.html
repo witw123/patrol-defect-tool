@@ -3179,17 +3179,19 @@
     var f = state.files[index];
     if (!f) return null;
     var key = fileKey(f);
-    var c = state.cache.get(key);
-    var isMarked = !preferClean && !!(state.markedFiles && state.markedFiles.has(key)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(key));
+    var c = state.cache.get(key) || state.cache.get(f.name);
+    var isMarked = !preferClean && !!(state.markedFiles && (state.markedFiles.has(key) || state.markedFiles.has(f.name))) && !!(state.markedBoxedHandles && (state.markedBoxedHandles.has(key) || state.markedBoxedHandles.has(f.name)));
 
     var isCachedValid = c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0)) && (c.img.complete !== false);
     if (isCachedValid) {
       if (isMarked && !c.isBoxed) {
         disposeCacheItem(c);
         state.cache.delete(key);
+        state.cache.delete(f.name);
       } else if (!isMarked && c.isBoxed) {
         disposeCacheItem(c);
         state.cache.delete(key);
+        state.cache.delete(f.name);
       } else {
         return c;
       }
@@ -3206,7 +3208,7 @@
         var isBoxedImg = false;
         if (isMarked) {
           try {
-            var boxedHandle = state.markedBoxedHandles.get(key);
+            var boxedHandle = state.markedBoxedHandles.get(key) || state.markedBoxedHandles.get(f.name);
             if (boxedHandle) {
               blob = await boxedHandle.getFile();
               isBoxedImg = true;
@@ -3509,7 +3511,7 @@
     ctx.lineWidth = 2 / v.zoom;
     ctx.stroke();
   }
-  function render() { renderBase(); renderOverlay(); }
+  function render(overrideImg) { renderBase(overrideImg); renderOverlay(); }
 
   /* ================= 位置提取与相近关联图谱匹配 ================= */
 
@@ -3696,12 +3698,15 @@
             loadingEl.style.display = '';
             try {
               var newC = await getImage(state.index, wantClean);
-              state.natural = { w: newC.img.naturalWidth, h: newC.img.naturalHeight };
-              var nFit = computeFit(newC.img.naturalWidth, newC.img.naturalHeight);
-              fitView(nFit.w, nFit.h, nFit.s);
-              render();
-              updateHud();
-              toast(wantClean ? '已切换至纯净原图' : '已切换至缺陷圈示图');
+              if (newC && newC.img) {
+                state.natural = { w: newC.img.naturalWidth, h: newC.img.naturalHeight };
+                var nFit = computeFit(newC.img.naturalWidth, newC.img.naturalHeight);
+                fitView(nFit.w, nFit.h, nFit.s);
+                render(newC.img);
+                renderSide();
+                updateHud();
+                toast(wantClean ? '已切换至纯净原图' : '已切换至缺陷圈示图');
+              }
             } catch (err) {
               toast('切换视图失败：' + (err && err.message || err));
             } finally {
@@ -4387,6 +4392,40 @@
 
   /* ================= 取消缺陷标记并删除输出目录对应文件 ================= */
 
+  function updateTreeAfterCancel(targetF, origName, fKey, idx) {
+    if (!pathTree) return;
+    var targetIdx = (idx !== undefined && idx >= 0) ? idx : (state.files ? state.files.indexOf(targetF) : -1);
+    var targetItem = targetIdx >= 0 ? pathTree.querySelector('.loc-item[data-idx="' + targetIdx + '"]') : null;
+    if (!targetItem && origName) {
+      try {
+        targetItem = pathTree.querySelector('.loc-item[data-raw-name="' + CSS.escape(origName) + '"]');
+      } catch (e) {}
+    }
+    if (!targetItem) {
+      targetItem = pathTree.querySelector('.loc-item.current');
+    }
+
+    if (targetItem) {
+      // 1. 移除已标徽章与删除按钮
+      var markedSpan = targetItem.querySelector('.item-marked-tag');
+      if (markedSpan) markedSpan.remove();
+      var delBtn = targetItem.querySelector('.btn-cancel-marked-mini');
+      if (delBtn) delBtn.remove();
+
+      // 2. 移除缺陷标签文本
+      var defectTagSpan = targetItem.querySelector('.item-defect-tag');
+      if (defectTagSpan) defectTagSpan.remove();
+
+      // 3. 在“已标记”筛选模式下就地隐藏该节点
+      if (filterMode === 'marked') {
+        targetItem.style.display = 'none';
+      }
+    }
+
+    invalidateFilterList();
+    refreshTreeStats();
+  }
+
   async function cancelMarkedDefect(target) {
     var origName = '';
     var idx = -1;
@@ -4401,7 +4440,7 @@
       origName = target;
       if (state.files) {
         for (var i = 0; i < state.files.length; i++) {
-          if (state.files[i].relPath === origName) {
+          if (state.files[i].relPath === origName || fileKey(state.files[i]) === origName) {
             idx = i;
             targetF = state.files[i];
             break;
@@ -4417,6 +4456,10 @@
           }
         }
       }
+    } else if (target && typeof target === 'object') {
+      targetF = target;
+      origName = target.name || '';
+      if (state.files) idx = state.files.indexOf(target);
     } else {
       targetF = curFile();
       origName = curName();
@@ -4428,7 +4471,7 @@
       return;
     }
 
-    var fKey = targetF ? (targetF.relPath || targetF.name) : origName;
+    var fKey = targetF ? fileKey(targetF) : origName;
     var isMarked = state.markedFiles && (state.markedFiles.has(fKey) || state.markedFiles.has(origName));
     if (!isMarked) {
       toast('该图片尚未标记为缺陷图片');
@@ -4441,63 +4484,64 @@
     );
     if (!confirmed) return;
 
-    loadingEl.style.display = '';
     try {
-      // 1. 在输出目录（缺陷圈示图、缺陷原图与危急缺陷）中查找并删除该照片的所有已输出文件
-      var deletedCount = await deleteExistingDefectOutputs(origName, null, targetF ? targetF.relPath : null);
-
-      // 2. 清除该照片在内存中的标记状态与缺陷标签
+      // 1. 内存中立即同步清除已标状态与标签（0ms 瞬时响应，绝不让用户等待）
       if (state.markedFiles) { state.markedFiles.delete(fKey); state.markedFiles.delete(origName); }
       if (state.markedBoxedHandles) { state.markedBoxedHandles.delete(fKey); state.markedBoxedHandles.delete(origName); }
       if (state.markedDefectTags) { state.markedDefectTags.delete(fKey); state.markedDefectTags.delete(origName); }
       if (state.markedCounts) { state.markedCounts.delete(fKey); state.markedCounts.delete(origName); }
       if (state.criticalFiles) { state.criticalFiles.delete(fKey); state.criticalFiles.delete(origName); }
 
-      // 3. 清理该照片的元数据（红框、追加缺陷标签、保存标记）
+      // 2. 清理该照片所有元数据（红框、追加缺陷标签、历史记录、保存标记）
       var m = getMeta(targetF || origName);
       m.saved = false;
       m.boxes = [];
       m.appended = [];
       m.history = [];
+      m.isSecondaryEdit = false;
+      m.tagsCleared = true;
+      selectedIndex = -1;
 
-      // 4. 清理该照片在缓存中的旧圈示图引用
-      if (fKey) state.cache.delete(fKey);
-      state.cache.delete(origName);
+      // 3. 彻底释放并移除已标记圈示图的显存与解码缓存，防止残留
+      var oldC1 = state.cache.get(fKey);
+      if (oldC1) { disposeCacheItem(oldC1); state.cache.delete(fKey); }
+      var oldC2 = state.cache.get(origName);
+      if (oldC2) { disposeCacheItem(oldC2); state.cache.delete(origName); }
 
-      // 5. 如果当前正在浏览这张照片，立即强制加载未绘制红框的纯净原始大图，无缝刷新（绝不黑屏）
-      if (idx === state.index && idx >= 0) {
+      // 4. 清理针对该图片的在途解码 Promise，防止旧圈示图异步返回冲刷纯净原图
+      inFlightImagePromises.delete(fKey + '_auto');
+      inFlightImagePromises.delete(fKey + '_clean');
+      inFlightImagePromises.delete(origName + '_auto');
+      inFlightImagePromises.delete(origName + '_clean');
+
+      // 5. 立即切换并瞬时加载/渲染初始纯净大图（零延迟，无需等待磁盘删除和全盘扫描）
+      if (idx >= 0) {
+        state.index = idx;
         var cleanC = await getImage(idx, true);
-        if (cleanC && cleanC.img && cleanC.img.naturalWidth > 0) {
-          state.natural = { w: cleanC.img.naturalWidth, h: cleanC.img.naturalHeight };
-          var fit = computeFit(cleanC.img.naturalWidth, cleanC.img.naturalHeight);
+        if (cleanC && cleanC.img && ((cleanC.img.naturalWidth > 0) || (cleanC.img.width > 0))) {
+          var cnw = cleanC.img.naturalWidth || cleanC.img.width;
+          var cnh = cleanC.img.naturalHeight || cleanC.img.height;
+          state.natural = { w: cnw, h: cnh };
+          var fit = computeFit(cnw, cnh);
           fitView(fit.w, fit.h, fit.s);
-          render();
+          render(cleanC.img);
           renderSide();
           updateHud();
         }
       }
 
-      // 6. 全量重新扫描输出目录并精准刷新左侧树与统计数据
-      await scanOutputDirectory();
+      // 6. 增量更新左侧树节点与统计徽章（O(1)，绝不重构整树，不扰动滚动条）
+      updateTreeAfterCancel(targetF, origName, fKey, idx);
 
-      // 7. 再次确认当前视图画面渲染正常（双重保障，绝无黑屏）
-      if (idx === state.index && idx >= 0) {
-        var curC = await getImage(idx, true);
-        if (curC && curC.img && curC.img.naturalWidth > 0) {
-          state.natural = { w: curC.img.naturalWidth, h: curC.img.naturalHeight };
-          var fit2 = computeFit(curC.img.naturalWidth, curC.img.naturalHeight);
-          fitView(fit2.w, fit2.h, fit2.s);
-          render();
-          renderSide();
-          updateHud();
-        }
-      }
+      // 7. 异步在后台从输出目录（缺陷圈示图、缺陷原图与危急缺陷）中删除已输出文件，绝不阻塞 UI 与画面刷新
+      deleteExistingDefectOutputs(origName, null, targetF ? targetF.relPath : null).then(function (deletedCount) {
+        toast('✓ 已成功取消标记，并还原为初始原图（已清理 ' + deletedCount + ' 个输出文件）');
+      }).catch(function (delErr) {
+        console.warn('删除输出文件警告:', delErr);
+      });
 
-      toast('✓ 已成功取消标记，并从输出目录删除了 ' + deletedCount + ' 个缺陷文件');
     } catch (err) {
       toast('取消标记失败：' + (err && err.message || err));
-    } finally {
-      loadingEl.style.display = 'none';
     }
   }
 
@@ -5900,7 +5944,7 @@
       e.preventDefault();
       var rawName = delBtn.dataset.rawName;
       var delIdx = parseInt(delBtn.dataset.idx, 10);
-      cancelMarkedDefect(rawName || delIdx);
+      cancelMarkedDefect(!isNaN(delIdx) && delIdx >= 0 ? delIdx : rawName);
       return;
     }
     if (e.target.closest('.folder-name-text')) {
@@ -5938,10 +5982,11 @@
     if (locItem && locItem.dataset.idx !== undefined) {
       var idx = parseInt(locItem.dataset.idx, 10);
       if (state.files && state.files[idx]) {
-        var fName = state.files[idx].name;
-        if (state.markedFiles && state.markedFiles.has(fName)) {
+        var fObj = state.files[idx];
+        var fk = fileKey(fObj);
+        if (state.markedFiles && (state.markedFiles.has(fk) || state.markedFiles.has(fObj.name))) {
           e.preventDefault();
-          cancelMarkedDefect(fName);
+          cancelMarkedDefect(idx);
         }
       }
     }
