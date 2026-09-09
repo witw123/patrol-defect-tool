@@ -42,14 +42,37 @@
   }
   * {
     box-sizing: border-box;
-    scrollbar-width: none !important;
-    -ms-overflow-style: none !important;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(140, 140, 140, 0.28) transparent;
   }
   *::-webkit-scrollbar,
   ::-webkit-scrollbar {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
+    width: 5px;
+    height: 5px;
+  }
+  *::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-thumb {
+    background: rgba(140, 140, 140, 0.28);
+    border-radius: 4px;
+  }
+  *::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(140, 140, 140, 0.55);
+  }
+  body.dark * {
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  }
+  body.dark *::-webkit-scrollbar-thumb,
+  body.dark ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+  }
+  body.dark *::-webkit-scrollbar-thumb:hover,
+  body.dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.48);
   }
   html, body { height: 100%; margin: 0; }
   body {
@@ -167,7 +190,7 @@
   /* ---- 主区域 ---- */
   #main { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
   
-  /* 左侧按名称前缀分类与位置监控面板（自适应宽度） */
+  /* 左侧按名称前缀分类与位置监控面板（自适应宽度，整体与树形均支持自适应紧凑滚动条） */
   #pathPanel {
     flex: 0 0 320px;
     width: 320px;
@@ -177,7 +200,9 @@
     padding: 8px 10px 10px;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
     min-height: 0;
     transition: width 100ms ease-out;
   }
@@ -231,12 +256,14 @@
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    min-height: 120px;
     overflow: hidden;
   }
   #pathTree {
     flex: 1 1 auto;
     overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
     min-height: 0;
     padding-right: 2px;
   }
@@ -676,27 +703,47 @@
     position: relative;
     background: var(--viewer-bg);
     display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #stageContainer {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    position: relative;
+    display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
   }
-  #stage { position: relative; }
+  #stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
   #stage canvas { position: absolute; inset: 0; display: block; }
   #overlayCanvas { cursor: crosshair; touch-action: none; }
 
-  /* 悬浮在图片正下方的操作栏（垂直居中排列：上方为预览，下方为保存按钮） */
+  /* 紧凑收敛固定在图片工作区正下方的操作栏（上方为预览，下方为保存按钮，自适应铺满不遮挡上方图片与红框） */
   #viewerBottomBar {
-    position: absolute;
-    bottom: 14px;
-    left: 50%;
-    transform: translateX(-50%);
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
+    padding: 6px 14px 10px;
     z-index: 45;
+    background: #1e1e1e;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
     pointer-events: none;
-    max-width: calc(100% - 32px);
+    width: 100%;
+    max-width: 100%;
+  }
+  body.dark #viewerBottomBar {
+    background: #171717;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
   #viewerBottomBar > * {
     pointer-events: auto;
@@ -936,7 +983,7 @@
   }
   #toast.show { opacity: 1; }
 
-  /* ---- 右侧缺陷简洁面板 ---- */
+  /* ---- 右侧缺陷简洁面板（自适应宽度，优雅紧凑滚动条） ---- */
   #side {
     flex: 0 0 310px;
     width: 310px;
@@ -946,10 +993,18 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    overflow: hidden;
     transition: width 100ms ease-out;
   }
   #sideHead { padding: 8px 10px; border-bottom: 1px solid var(--panel-border); }
-  #sideScroll { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 6px 10px 16px; }
+  #sideScroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    min-height: 0;
+    padding: 6px 10px 16px;
+  }
 
   .sec-title {
     font-size: 11.5px; color: var(--muted); font-weight: 600;
@@ -1576,9 +1631,11 @@
     <div id="leftResizer" class="resizer-v" title="左右拖拽调整宽度，双击自动适配最长文本宽度"></div>
 
     <div id="viewer">
-      <div id="stage">
-        <canvas id="baseCanvas"></canvas>
-        <canvas id="overlayCanvas"></canvas>
+      <div id="stageContainer">
+        <div id="stage">
+          <canvas id="baseCanvas"></canvas>
+          <canvas id="overlayCanvas"></canvas>
+        </div>
       </div>
 
       <!-- 图片框选区正下方操作栏：上方为新文件名预览（含可点击撤回徽章），下方为自适应保存按钮与二次编辑按钮 -->
@@ -1825,7 +1882,7 @@
   var IMG_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'];
   var strokeWidth = 10;
   var MIN_ZOOM = 0.1, MAX_ZOOM = 10, HANDLE_PX = 8;
-  var CACHE_LIMIT = 50;
+  var CACHE_LIMIT = 100;
 
   var KEY_THEME = 'xunjian_theme';
   var KEY_NO_PROMPT = 'xunjian_no_prompt';
@@ -2397,7 +2454,7 @@
   var btnPrev = $('btnPrev'), btnNext = $('btnNext');
   var counter = $('counter'), groupTag = $('groupTag'), filenameEl = $('filename');
   var dirtyDot = $('dirtyDot'), savedFlash = $('savedFlash');
-  var viewer = $('viewer'), stage = $('stage');
+  var viewer = $('viewer'), stageContainer = $('stageContainer'), stage = $('stage');
   var viewerBottomBar = $('viewerBottomBar'), previewEl = $('preview'), btnBottomSave = $('btnBottomSave'), btnClearSecondary = $('btnClearSecondary'), btnCritical = $('btnCritical');
   var pathPanel = $('pathPanel'), pathTree = $('pathTree'), dirSummaryText = $('dirSummaryText'), btnBackToCurrent = $('btnBackToCurrent');
   var btnSyncOutput = $('btnSyncOutput');
@@ -2990,6 +3047,7 @@
     btnFilterUnviewed.classList.remove('active');
     state.mode = mode;
     state.files = entries;
+    invalidateFilterList();
     state.byName = new Map();
     state.byKey = new Map();
     state.indexByName = new Map();
@@ -3034,6 +3092,7 @@
 
   function loadImageElement(url) {
     var img = new Image();
+    img.decoding = 'async';
     img.src = url;
     if (img.decode) {
       return img.decode().then(function () {
@@ -3166,9 +3225,9 @@
     var seen = new Set();
     seen.add(curIdx);
 
-    // 1. 向前预测 3 张（切图最主要方向，优先加载）
+    // 1. 向前深度预加载 8 张（切图主方向，并发后台解码，实现丝滑秒切）
     var fwd = curIdx;
-    for (var i = 0; i < 3; i++) {
+    for (var i = 0; i < 8; i++) {
       var next = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(fwd, 1) : (fwd + 1);
       if (next >= 0 && next < state.files.length && !seen.has(next)) {
         seen.add(next);
@@ -3179,9 +3238,9 @@
       }
     }
 
-    // 2. 向后预测 2 张（方便随时回看）
+    // 2. 向后预加载 4 张（满足随时倒退回看需求）
     var bwd = curIdx;
-    for (var j = 0; j < 2; j++) {
+    for (var j = 0; j < 4; j++) {
       var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(bwd, -1) : (bwd - 1);
       if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
         seen.add(prev);
@@ -3192,8 +3251,8 @@
       }
     }
 
-    // 3. 补充自然序列邻近项
-    var rawNeighbors = [curIdx + 1, curIdx - 1];
+    // 3. 补充自然物理序列邻近项
+    var rawNeighbors = [curIdx + 1, curIdx + 2, curIdx - 1, curIdx - 2];
     for (var k = 0; k < rawNeighbors.length; k++) {
       var rIdx = rawNeighbors[k];
       if (rIdx >= 0 && rIdx < state.files.length && !seen.has(rIdx)) {
@@ -3213,7 +3272,7 @@
       return isMarked !== c.isBoxed;
     });
 
-    // 并发后台预解码（利用浏览器 I/O 线程与 GPU 纹理线程，完全不占主线程）
+    // 并发后台异步解码（不占主线程微任务）
     for (var m = 0; m < needed.length; m++) {
       (function (tIdx) {
         getImage(tIdx).catch(function () {});
@@ -3236,14 +3295,15 @@
   window.addEventListener('resize', invalidateCanvasRect);
 
   function computeFit(nw, nh) {
-    var pad = 12;
-    var availW = Math.max(10, viewer.clientWidth - pad * 2);
-    var availH = Math.max(10, viewer.clientHeight - pad * 2 - 75);
+    var container = $('stageContainer') || viewer;
+    var pad = 6;
+    var availW = Math.max(10, container.clientWidth - pad * 2);
+    var availH = Math.max(10, container.clientHeight - pad * 2);
     if (!nw || !nh || nw <= 0 || nh <= 0) {
       return { w: 100, h: 100, s: 1 };
     }
-    var s = Math.min(1, availW / nw, availH / nh);
-    return { w: nw * s, h: nh * s, s: s };
+    var s = Math.min(availW / nw, availH / nh);
+    return { w: Math.round(nw * s), h: Math.round(nh * s), s: s };
   }
   function fitView(w, h, s) {
     invalidateCanvasRect();
@@ -3409,12 +3469,51 @@
     return true;
   }
 
+  var filterListDirty = true;
+  var cachedFilteredList = [];
+  var cachedFilteredPosMap = new Map();
+
+  function invalidateFilterList() {
+    filterListDirty = true;
+  }
+
+  function ensureFilterList() {
+    if (!filterListDirty) return;
+    cachedFilteredList = [];
+    cachedFilteredPosMap.clear();
+    if (state.files) {
+      for (var fi = 0; fi < state.files.length; fi++) {
+        if (isFileMatchingFilter(fi)) {
+          cachedFilteredPosMap.set(fi, cachedFilteredList.length);
+          cachedFilteredList.push(fi);
+        }
+      }
+    }
+    filterListDirty = false;
+  }
+
   function getNextFilteredIndex(fromIdx, step) {
     if (!state.files || state.files.length === 0) return -1;
-    var i = fromIdx + step;
-    while (i >= 0 && i < state.files.length) {
-      if (isFileMatchingFilter(i)) return i;
-      i += step;
+    if (filterMode === 'all') {
+      var next = fromIdx + step;
+      return (next >= 0 && next < state.files.length) ? next : -1;
+    }
+    ensureFilterList();
+    if (cachedFilteredList.length === 0) return -1;
+    if (fromIdx < 0) return cachedFilteredList[0];
+    var pos = cachedFilteredPosMap.has(fromIdx) ? cachedFilteredPosMap.get(fromIdx) : -1;
+    if (pos >= 0) {
+      var nPos = pos + step;
+      return (nPos >= 0 && nPos < cachedFilteredList.length) ? cachedFilteredList[nPos] : -1;
+    }
+    if (step > 0) {
+      for (var k = 0; k < cachedFilteredList.length; k++) {
+        if (cachedFilteredList[k] > fromIdx) return cachedFilteredList[k];
+      }
+    } else {
+      for (var m = cachedFilteredList.length - 1; m >= 0; m--) {
+        if (cachedFilteredList[m] < fromIdx) return cachedFilteredList[m];
+      }
     }
     return -1;
   }
@@ -3432,16 +3531,11 @@
     var f = state.files[state.index];
     var parsed = parseFilePrefixAndLocation(f.name, f.relPath);
 
-    // 筛选状态下动态统计当前过滤集合内的位置和总数
+    // 筛选状态下动态统计当前过滤集合内的位置和总数（采用 O(1) 索引映射，彻底消除千图切图延迟）
     if (filterMode !== 'all') {
-      var filterCount = 0;
-      var filterPos = 0;
-      for (var fi = 0; fi < state.files.length; fi++) {
-        if (isFileMatchingFilter(fi)) {
-          filterCount++;
-          if (fi <= state.index) filterPos++;
-        }
-      }
+      ensureFilterList();
+      var filterCount = cachedFilteredList.length;
+      var filterPos = cachedFilteredPosMap.has(state.index) ? (cachedFilteredPosMap.get(state.index) + 1) : 0;
       var filterNames = { marked: '已标记', unmarked: '未标记', unviewed: '未看' };
       var fLabel = filterNames[filterMode] || '筛选';
       counter.textContent = (filterPos > 0 ? filterPos : '—') + ' / ' + filterCount + ' [' + fLabel + ']';
@@ -3575,6 +3669,7 @@
       var p = (f.relPath || f.name || '');
       return p.indexOf('缺陷圈示图') < 0 && p.indexOf('缺陷原图') < 0 && p.indexOf('危急缺陷') < 0 && p.indexOf('全绝缘缺陷') < 0 && p.indexOf('其他缺陷') < 0;
     });
+    invalidateFilterList();
     state.byName = new Map();
     state.byKey = new Map();
     state.indexByName = new Map();
@@ -3787,6 +3882,7 @@
       state.markedDefectTags = markedDefectTags;
       state.markedCounts = markedCounts;
       state.criticalFiles = await scanCriticalDirectory();
+      invalidateFilterList();
       renderPathTree(false);
       updateHud();
 
@@ -4907,6 +5003,7 @@
     }
   }
 
+  var loadingDebounceTimer = null;
   var refreshTreeStatsTimer = null;
   function scheduleRefreshTreeStats() {
     if (refreshTreeStatsTimer) return;
@@ -5036,26 +5133,23 @@
       scheduleRefreshTreeStats();
     }
 
-    // 4. 自动滚动到中间区域（居中对齐）
-    if (shouldScroll) {
+    // 4. 滚动定位（若目标已在视野舒适区则不触发扰动滚动，边缘时平滑跟进）
+    if (shouldScroll && targetEl && pathTree) {
       var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       var isRapid = (now - lastTreeScrollTime < 100);
       lastTreeScrollTime = now;
-      var scrollCentered = function (smooth) {
-        if (targetEl && targetEl.isConnected) {
-          targetEl.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
-        }
-      };
-      scrollCentered(!isRapid);
-      // DOM 折叠/展开引起布局尺寸变化后，下一动画帧二次精准对齐居中
-      requestAnimationFrame(function () {
-        scrollCentered(false);
-      });
+      var treeRect = pathTree.getBoundingClientRect();
+      var elRect = targetEl.getBoundingClientRect();
+      var isVisible = (elRect.top >= treeRect.top + 24 && elRect.bottom <= treeRect.bottom - 24);
+      if (!isVisible) {
+        targetEl.scrollIntoView({ block: 'nearest', behavior: isRapid ? 'auto' : 'smooth' });
+      }
     }
   }
 
   function setFilterMode(mode) {
     filterMode = mode;
+    invalidateFilterList();
     btnFilterAll.classList.toggle('active', mode === 'all');
     btnFilterMarked.classList.toggle('active', mode === 'marked');
     btnFilterUnmarked.classList.toggle('active', mode === 'unmarked');
@@ -5819,6 +5913,10 @@
         saveViewedPhotos();
       }
 
+      if (isNewlyViewed) {
+        invalidateFilterList();
+      }
+
       // 核心优化：优先绘制画布主图（第 0 帧瞬时上屏，绝对零卡顿零白屏）
       var curFKey = fileKey(curF);
       var cached = state.cache.get(curFKey);
@@ -5826,21 +5924,27 @@
       var isCacheValid = cached && cached.img && cached.img.naturalWidth > 0 && cached.img.complete && (isMarked ? cached.isBoxed : !cached.isBoxed);
 
       if (isCacheValid) {
+        clearTimeout(loadingDebounceTimer);
+        if (loadingEl) loadingEl.style.display = 'none';
         state.natural = { w: cached.img.naturalWidth, h: cached.img.naturalHeight };
         var fit = computeFit(cached.img.naturalWidth, cached.img.naturalHeight);
         fitView(fit.w, fit.h, fit.s);
         render();
         preloadAhead(index);
       } else {
-        loadingEl.style.display = '';
+        clearTimeout(loadingDebounceTimer);
+        loadingDebounceTimer = setTimeout(function () {
+          if (loadingEl) loadingEl.style.display = '';
+        }, 100);
         var c = await getImage(index);
+        clearTimeout(loadingDebounceTimer);
+        if (loadingEl) loadingEl.style.display = 'none';
         if (c && c.img && c.img.naturalWidth > 0) {
           state.natural = { w: c.img.naturalWidth, h: c.img.naturalHeight };
           var fit2 = computeFit(c.img.naturalWidth, c.img.naturalHeight);
           fitView(fit2.w, fit2.h, fit2.s);
           render();
         }
-        loadingEl.style.display = 'none';
         preloadAhead(index);
       }
 
@@ -5849,7 +5953,8 @@
       renderSide();
       updatePathTreeSelection(index, true);
     } catch (err) {
-      loadingEl.style.display = 'none';
+      clearTimeout(loadingDebounceTimer);
+      if (loadingEl) loadingEl.style.display = 'none';
       toast('加载失败：' + (err && err.message || err));
     } finally {
       state.navBusy = false;
@@ -7897,6 +8002,7 @@
       state.natural = { w: boxedImg.naturalWidth, h: boxedImg.naturalHeight };
       render();
       renderSide();
+      invalidateFilterList();
       updateHud();
 
       // 局部增量刷新已标状态
@@ -8007,6 +8113,7 @@
       state.cache.set(name, cachedObj);
       state.natural = { w: boxedImg.naturalWidth, h: boxedImg.naturalHeight };
       render();
+      invalidateFilterList();
       updateHud();
       renderSide();
 
