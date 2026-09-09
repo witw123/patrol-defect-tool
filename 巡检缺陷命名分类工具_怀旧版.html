@@ -5946,10 +5946,8 @@
   /* ================= 极速图片切换引擎（0 延迟即时响应 + 渲染解耦） ================= */
 
   var navTargetIndex = -1;
-  var deferredUpdateTimer = null;
   var switchGeneration = 0;
   var loadingDebounceTimer = null;
-  var isHoldScrubbing = false;
 
   function updateHudLightweight(index) {
     if (index < 0 || !state.files || !state.files[index]) return;
@@ -5970,16 +5968,12 @@
     filenameEl.title = f.relPath || f.name;
   }
 
-  function scheduleDeferredAuxiliaryUpdates(index) {
-    if (deferredUpdateTimer) clearTimeout(deferredUpdateTimer);
-    deferredUpdateTimer = setTimeout(function () {
-      deferredUpdateTimer = null;
-      if (index === state.index) {
-        updateHud();
-        renderSide();
-        updatePathTreeSelection(index, true);
-      }
-    }, 70);
+  function syncAllUI(index) {
+    if (index < 0 || !state.files || !state.files[index]) return;
+    updateHud();
+    renderSide();
+    updatePathTreeSelection(index, true);
+    refreshTreeStats();
   }
 
   async function switchTo(index, force) {
@@ -6024,7 +6018,7 @@
       invalidateFilterList();
     }
 
-    // 0ms 即时轻量更新 HUD（数字与文件名秒变，杜绝任何卡滞感）
+    // 0ms 即时轻量更新 HUD（数字与文件名秒变）
     updateHudLightweight(index);
 
     // 核心优化：优先从显存预解码缓存中直出画面（第 0 帧瞬时上屏，绝对零卡顿零白屏）
@@ -6044,30 +6038,23 @@
       fitView(fit.w, fit.h, fit.s);
       render();
 
-      if (!isHoldScrubbing) {
-        schedulePreloadAhead(index);
-        scheduleDeferredAuxiliaryUpdates(index);
-      }
+      schedulePreloadAhead(index);
+      syncAllUI(index);
       return;
     }
 
-    if (isHoldScrubbing) {
-      // 处于长按极速连切中：中间未命中缓存的帧跳过慢速磁盘I/O，当松手或停下时再加载
-      return;
-    }
-
-    // 未命中缓存：防抖 100ms 显示加载指示器，启动并发安全异步加载
+    // 未命中缓存：防抖 80ms 显示加载指示器，启动异步加载并渲染
     clearTimeout(loadingDebounceTimer);
     loadingDebounceTimer = setTimeout(function () {
       if (thisSwitchGen === switchGeneration && loadingEl) {
         loadingEl.style.display = '';
       }
-    }, 100);
+    }, 80);
 
     try {
       var c = await getImage(index);
       if (thisSwitchGen !== switchGeneration) {
-        // 加载期间用户已快速切到新图，丢弃旧帧避免抢占最新画面
+        // 加载期间用户已切换到新图，丢弃旧帧避免抢占最新画面
         return;
       }
       clearTimeout(loadingDebounceTimer);
@@ -6083,57 +6070,13 @@
       }
 
       schedulePreloadAhead(index);
-      scheduleDeferredAuxiliaryUpdates(index);
+      syncAllUI(index);
     } catch (err) {
       if (thisSwitchGen !== switchGeneration) return;
       clearTimeout(loadingDebounceTimer);
       if (loadingEl) loadingEl.style.display = 'none';
       toast('加载失败：' + (err && err.message || err));
     }
-  }
-
-  async function ensurePhotoFullyLoaded(index) {
-    if (index < 0 || !state.files || index >= state.files.length) return;
-    var thisSwitchGen = switchGeneration;
-    var curF = state.files[index];
-    var curFKey = fileKey(curF);
-    var cached = state.cache.get(curFKey);
-    var isMarked = !!(state.markedFiles && state.markedFiles.has(curFKey)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(curFKey));
-    var isCacheValid = cached && cached.img && ((cached.img.naturalWidth > 0) || (cached.img.width > 0)) && (cached.img.complete !== false) && (isMarked ? cached.isBoxed : !cached.isBoxed);
-
-    if (isCacheValid) {
-      if (loadingEl) loadingEl.style.display = 'none';
-      var nw = cached.img.naturalWidth || cached.img.width;
-      var nh = cached.img.naturalHeight || cached.img.height;
-      state.natural = { w: nw, h: nh };
-      var fit = computeFit(nw, nh);
-      fitView(fit.w, fit.h, fit.s);
-      render();
-    } else {
-      if (loadingEl) loadingEl.style.display = '';
-      try {
-        var c = await getImage(index);
-        if (thisSwitchGen !== switchGeneration) return;
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0))) {
-          var cnw = c.img.naturalWidth || c.img.width;
-          var cnh = c.img.naturalHeight || c.img.height;
-          state.natural = { w: cnw, h: cnh };
-          var fit2 = computeFit(cnw, cnh);
-          fitView(fit2.w, fit2.h, fit2.s);
-          render();
-        }
-      } catch (err) {
-        if (thisSwitchGen !== switchGeneration) return;
-        if (loadingEl) loadingEl.style.display = 'none';
-        toast('加载失败：' + (err && err.message || err));
-      }
-    }
-
-    schedulePreloadAhead(index);
-    updateHud();
-    renderSide();
-    updatePathTreeSelection(index, true);
   }
 
   /* ================= 候选分类池（可增删改）核心方法 ================= */
@@ -8841,78 +8784,69 @@
   }
 
   /* ================= 长按极速连切引擎（Hold-to-Fast-Scrub Engine） ================= */
-  var holdNavTimer = null;
-  var holdInitialTimer = null;
   var activeHoldKey = null; // 'left' | 'right' | null
-  var scrubTickCount = 0;
+  var holdInitialTimer = null;
+  var isScrubLoopRunning = false;
 
-  function stepSwitch(dir) {
+  async function stepSwitch(dir) {
     var baseIdx = (navTargetIndex >= 0) ? navTargetIndex : state.index;
     var nextIdx = getNextFilteredIndex(baseIdx, dir);
     if (nextIdx >= 0) {
       navTargetIndex = nextIdx;
-      switchTo(nextIdx);
+      await switchTo(nextIdx);
       return true;
     } else {
-      if (!isHoldScrubbing) {
-        var msg = (filterMode === 'all') ? (dir > 0 ? '已是最后一张照片' : '已是第一张照片') :
-                  (filterMode === 'marked' ? (dir > 0 ? '已是最后一张已标记照片' : '已是第一张已标记照片') :
-                  (filterMode === 'unmarked' ? (dir > 0 ? '已是最后一张未标记照片' : '已是第一张未标记照片') :
-                  (dir > 0 ? '已是最后一张未看照片' : '已是第一张未看照片')));
-        toast(msg);
-      }
+      var msg = (filterMode === 'all') ? (dir > 0 ? '已是最后一张照片' : '已是第一张照片') :
+                (filterMode === 'marked' ? (dir > 0 ? '已是最后一张已标记照片' : '已是第一张已标记照片') :
+                (filterMode === 'unmarked' ? (dir > 0 ? '已是最后一张未标记照片' : '已是第一张未标记照片') :
+                (dir > 0 ? '已是最后一张未看照片' : '已是第一张未看照片')));
+      toast(msg);
       return false;
     }
   }
 
-  function startHoldScrub(direction) {
+  async function startHoldScrub(direction) {
     var targetKeyType = direction > 0 ? 'right' : 'left';
     if (activeHoldKey === targetKeyType) return;
     if (activeHoldKey !== null) stopHoldScrub();
 
     activeHoldKey = targetKeyType;
-    scrubTickCount = 0;
 
-    // 立即执行第 1 次切换（0ms 即点即切）
-    var moved = stepSwitch(direction);
-    if (!moved) {
+    // 1. 立即执行第 1 次切换（0ms 即点即切）
+    var moved = await stepSwitch(direction);
+    if (!moved || activeHoldKey !== targetKeyType) {
       activeHoldKey = null;
       return;
     }
 
-    // 按下超过 180ms 自动转入连续极速飞切
-    holdInitialTimer = setTimeout(function () {
+    // 2. 长按检测：按下持续 160ms 自动转入连续连切
+    holdInitialTimer = setTimeout(async function () {
       holdInitialTimer = null;
-      if (activeHoldKey === null) return;
-      isHoldScrubbing = true;
+      if (activeHoldKey !== targetKeyType || isScrubLoopRunning) return;
 
-      function scrubTick() {
-        if (activeHoldKey === null) return;
-        var dir = (activeHoldKey === 'right') ? 1 : -1;
-        var ok = stepSwitch(dir);
-        if (ok) {
-          scrubTickCount++;
-          var delay = (scrubTickCount < 3) ? 80 : 55;
-          holdNavTimer = setTimeout(scrubTick, delay);
-        } else {
-          stopHoldScrub();
+      isScrubLoopRunning = true;
+      try {
+        while (activeHoldKey === targetKeyType) {
+          var t0 = performance.now();
+          var ok = await stepSwitch(direction);
+          if (!ok || activeHoldKey !== targetKeyType) break;
+
+          var elapsed = performance.now() - t0;
+          // 速度曲线：保持每帧在屏幕停留 75ms（约 13 张/秒），既飞速流畅又确保左侧树高亮、统计数字与中间大图 100% 实时同步
+          var delay = Math.max(10, 75 - elapsed);
+          await new Promise(function (res) { setTimeout(res, delay); });
         }
+      } finally {
+        isScrubLoopRunning = false;
       }
-      scrubTick();
-    }, 180);
+    }, 160);
   }
 
   function stopHoldScrub() {
-    var wasHolding = (activeHoldKey !== null || isHoldScrubbing);
-    isHoldScrubbing = false;
     activeHoldKey = null;
-    scrubTickCount = 0;
-
-    if (holdInitialTimer) { clearTimeout(holdInitialTimer); holdInitialTimer = null; }
-    if (holdNavTimer) { clearTimeout(holdNavTimer); holdNavTimer = null; }
-
-    if (wasHolding && state.index >= 0) {
-      ensurePhotoFullyLoaded(state.index);
+    if (holdInitialTimer) {
+      clearTimeout(holdInitialTimer);
+      holdInitialTimer = null;
     }
   }
 
