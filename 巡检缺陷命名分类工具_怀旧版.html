@@ -1882,7 +1882,7 @@
   var IMG_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'];
   var strokeWidth = 10;
   var MIN_ZOOM = 0.1, MAX_ZOOM = 10, HANDLE_PX = 8;
-  var CACHE_LIMIT = 8;
+  var CACHE_LIMIT = 4;
 
   var KEY_THEME = 'xunjian_theme';
   var KEY_NO_PROMPT = 'xunjian_no_prompt';
@@ -3099,7 +3099,12 @@
       if (c.url) URL.revokeObjectURL(c.url);
     } catch (e) {}
     if (c.img && c.img.tagName === 'IMG') {
+      c.img.onload = null;
+      c.img.onerror = null;
       c.img.src = '';
+    }
+    if (currentRenderedImg === c.img) {
+      currentRenderedImg = null;
     }
     c.img = null;
     c.url = null;
@@ -3140,11 +3145,15 @@
       function onOk() {
         if (settled) return;
         settled = true;
+        img.onload = null;
+        img.onerror = null;
         resolve(img);
       }
       function onErr() {
         if (settled) return;
         settled = true;
+        img.onload = null;
+        img.onerror = null;
         reject(new Error('图片加载失败'));
       }
 
@@ -3233,6 +3242,14 @@
           key: key,
           isBoxed: isBoxedImg
         };
+
+        // 核心内存防线：如果加载完成时用户已经大幅切走（距离当前显示位置 > 2 张），
+        // 视为过期失效任务，立即销毁释放显存，绝不塞入缓存挤出当前有用的相邻图片
+        if (state.index >= 0 && Math.abs(index - state.index) > 2) {
+          disposeCacheItem(c);
+          return null;
+        }
+
         state.cache.set(key, c);
         evictLRU(index);
         return c;
@@ -3251,9 +3268,12 @@
     var curIdx = (state.index >= 0) ? state.index : cur;
     var keys = Array.from(state.cache.keys());
     keys.sort(function (a, b) {
-      var ia = (state.indexByKey && state.indexByKey.has(a)) ? state.indexByKey.get(a) : curIdx;
-      var ib = (state.indexByKey && state.indexByKey.has(b)) ? state.indexByKey.get(b) : curIdx;
-      return Math.abs(ib - curIdx) - Math.abs(ia - curIdx);
+      var ia = (state.indexByKey && state.indexByKey.has(a)) ? state.indexByKey.get(a) : -99999;
+      var ib = (state.indexByKey && state.indexByKey.has(b)) ? state.indexByKey.get(b) : -99999;
+      // 距离当前 curIdx 越远越优先逐出；孤儿 key 直接最优先逐出
+      var distA = (ia === -99999) ? 999999 : Math.abs(ia - curIdx);
+      var distB = (ib === -99999) ? 999999 : Math.abs(ib - curIdx);
+      return distB - distA;
     });
     for (var i = 0; i < keys.length; i++) {
       if (state.cache.size <= CACHE_LIMIT) break;
@@ -3272,12 +3292,12 @@
     schedulePreloadAhead(index);
   }
 
-  /* ================= 极速双向智能预加载引擎（并发限流调度 + 优先级抢占） ================= */
+  /* ================= 极速轻量预加载引擎（单路限流 + 贴身预测） ================= */
 
   var preloadQueue = [];
   var activePreloadCount = 0;
-  var MAX_CONCURRENT_PRELOAD = 2; // 控制在 2 个并发后台解码，避免打满 I/O 与工作线程
-  var preloadGeneration = 0; // 换代计数器：当目标发生大幅改变时，立即作废旧代任务
+  var MAX_CONCURRENT_PRELOAD = 1; // 控制在 1 个后台解码，留出全部系统算力确保前台切图和渲染 120 满帧
+  var preloadGeneration = 0;      // 换代计数器：切图时作废旧代任务
 
   function schedulePreload(curIdx) {
     schedulePreloadAhead(curIdx);
@@ -3292,9 +3312,9 @@
     var seen = new Set();
     seen.add(curIdx);
 
-    // 1. 向前预测 4 张（切图主方向，优先级最高）
+    // 1. 向前预测 1~2 张（主切图方向）
     var fwd = curIdx;
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 2; i++) {
       var next = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(fwd, 1) : (fwd + 1);
       if (next >= 0 && next < state.files.length && !seen.has(next)) {
         seen.add(next);
@@ -3305,17 +3325,11 @@
       }
     }
 
-    // 2. 向后缓冲 2 张（倒退回看缓冲）
-    var bwd = curIdx;
-    for (var j = 0; j < 2; j++) {
-      var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(bwd, -1) : (bwd - 1);
-      if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
-        seen.add(prev);
-        targets.push({ idx: prev, priority: 5 - j });
-        bwd = prev;
-      } else {
-        break;
-      }
+    // 2. 向后缓冲 1 张（回看微缓冲）
+    var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(curIdx, -1) : (curIdx - 1);
+    if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
+      seen.add(prev);
+      targets.push({ idx: prev, priority: 5 });
     }
 
     // 过滤掉已处于有效缓存中的目标
@@ -5281,20 +5295,21 @@
     }
 
     if (isNewView && filterMode === 'unviewed') {
-      renderPathTree(true);
+      targetEl.style.display = 'none';
+      updateStatsOnPhotoViewed(curFileObj);
       return;
     }
 
-    // 4. 滚动定位（若目标已在视野舒适区则不触发扰动滚动，边缘时平滑跟进）
+    // 4. 滚动定位（直接基于 offsetTop 计算，彻底消除 getBoundingClientRect 强制同步重排）
     if (shouldScroll && targetEl && pathTree) {
-      var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      var isRapid = (now - lastTreeScrollTime < 100);
-      lastTreeScrollTime = now;
-      var treeRect = pathTree.getBoundingClientRect();
-      var elRect = targetEl.getBoundingClientRect();
-      var isVisible = (elRect.top >= treeRect.top + 24 && elRect.bottom <= treeRect.bottom - 24);
-      if (!isVisible) {
-        targetEl.scrollIntoView({ block: 'nearest', behavior: isRapid ? 'auto' : 'smooth' });
+      var itemTop = targetEl.offsetTop;
+      var itemH = targetEl.offsetHeight || 26;
+      var sTop = pathTree.scrollTop;
+      var sH = pathTree.clientHeight;
+      if (itemTop < sTop + 24) {
+        pathTree.scrollTop = Math.max(0, itemTop - 40);
+      } else if (itemTop + itemH > sTop + sH - 24) {
+        pathTree.scrollTop = itemTop + itemH - sH + 40;
       }
     }
   }
@@ -6059,7 +6074,7 @@
     updateHud();
     renderSide();
     updatePathTreeSelection(index, true);
-    refreshTreeStats();
+    updateStatsOnPhotoViewed(state.files[index]);
   }
 
   async function switchTo(index, force) {
@@ -6419,8 +6434,15 @@
     if (saveViewedTimer) clearTimeout(saveViewedTimer);
     saveViewedTimer = setTimeout(function () {
       saveViewedTimer = null;
-      try { localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap)); } catch (e) {}
-    }, 400);
+      var doSave = function () {
+        try { localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap)); } catch (e) {}
+      };
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(doSave, { timeout: 1000 });
+      } else {
+        doSave();
+      }
+    }, 1200);
   }
   window.addEventListener('beforeunload', function () { saveViewedPhotos(true); });
   function loadViewedPhotos() {
