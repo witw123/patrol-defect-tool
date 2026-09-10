@@ -773,10 +773,17 @@
   }
   .preview-base {
     color: #e0e0de;
-    max-width: 320px;
+    max-width: 480px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 1px 4px;
+    transition: background-color 0.15s;
+  }
+  .preview-base:hover {
+    background: rgba(255, 255, 255, 0.08);
   }
   .preview-tag {
     display: inline-flex;
@@ -2723,7 +2730,7 @@
     return res;
   }
 
-  var towerRegex = /(?:#\s*\d+(?:[-~_]\d+|[A-Za-z])?(?:号?[杆塔基]|#)?|\d+\s*#\s*(?:号?[杆塔基])(?!(?:支线|主线|联络线|专线|回线|线路|线))|\d+\s*#(?![\u4e00-\u9fa5\u2160-\u217fA-Za-z0-9_#]*(?:支线|主线|联络线|专线|回线|线路|线))|\d+\s*号(?:杆塔|[杆塔基])|\d+\s*(?:杆塔|[杆塔基])|第\s*\d+(?:[-~_]\d+|[A-Za-z])?\s*号?[杆塔基]|\d+[-~_]\d+(?:号?[杆塔基]|跨|档)|(?:[PTGNptgn]|Tower|Pole)\s*[-_]?\s*\d+(?:[-~_]\d+|[A-Za-z])?|^\d+(?:[-_]\d+)?$)/i;
+  var towerRegex = /(?:#\s*\d+(?:[-~_]\d+|[A-Za-z])?(?:[-~_]#?\s*\d+(?:[-~_]\d+|[A-Za-z])*)?(?:号?[杆塔基]|#)?|\d+\s*#\s*(?:号?[杆塔基])(?!(?:支线|主线|联络线|专线|回线|线路|线))|\d+\s*#(?![\u4e00-\u9fa5\u2160-\u217fA-Za-z0-9_#]*(?:支线|主线|联络线|专线|回线|线路|线))|\d+\s*号(?:杆塔|[杆塔基])|\d+\s*(?:杆塔|[杆塔基])|第\s*\d+(?:[-~_]\d+|[A-Za-z])?\s*号?[杆塔基]|\d+[-~_]\d+(?:号?[杆塔基]|跨|档)|(?:[PTGNptgn]|Tower|Pole)\s*[-_]?\s*\d+(?:[-~_]\d+|[A-Za-z])?|^\d+(?:[-_]\d+)?$)/i;
 
   function parseDirToLineAndTower(dirPath, rootLineName) {
     var rel = String(dirPath || '').replace(/\\/g, '/');
@@ -2796,7 +2803,7 @@
     // 2. 若目录未体现杆塔，从文件名安全提取杆塔
     if (!tower || tower === '默认杆塔') {
       var isCameraSeq = /^(?:DJI|IMG|DSC|DCIM|PANO|VID|SCREENSHOT|QQ图片|微信图片)/i.test(base);
-      var segs = base.split(/[_\-—\s]+/).filter(Boolean);
+      var segs = base.split(/[_\s]+/).filter(Boolean);
       for (var j = 0; j < segs.length; j++) {
         var s = segs[j];
         var stm = s.match(towerRegex);
@@ -3975,6 +3982,19 @@
                       matchedOrigName = origName;
                       matchedOrigKey = sf.relPath || sf.name;
                     }
+                  } else {
+                    var fInfo = parseFilePrefixAndLocation(fname, '');
+                    var sfInfo = sf._parsedInfo || (sf._parsedInfo = parseFilePrefixAndLocation(sf.name, sf.relPath));
+                    var towerMatch = sfInfo.tower && fInfo.tower && (sfInfo.tower === fInfo.tower || fInfo.tower.startsWith(sfInfo.tower + '-') || fInfo.tower.startsWith(sfInfo.tower + '~'));
+                    if (sfInfo.prefix && fInfo.prefix && sfInfo.prefix === fInfo.prefix &&
+                        towerMatch &&
+                        sfInfo.loc && fInfo.loc && (sfInfo.loc === fInfo.loc || fInfo.loc.startsWith(sfInfo.loc))) {
+                      if (origBase.length > maxMatchLen) {
+                        maxMatchLen = origBase.length;
+                        matchedOrigName = origName;
+                        matchedOrigKey = sf.relPath || sf.name;
+                      }
+                    }
                   }
                 }
                 if (matchedOrigName) {
@@ -4372,12 +4392,14 @@
           var ext = fname.slice(fname.lastIndexOf('.')).toLowerCase();
           if (ext === origExt) {
             var fBase = fname.slice(0, fname.lastIndexOf('.'));
-            if (fBase === origBase || fBase.startsWith(origBase + '_') || fBase.startsWith(origBase + '-') || fBase.startsWith(origBase + '__') || fBase.indexOf('__' + origBase) >= 0) {
+            var customBase = (typeof getCustomBaseName === 'function') ? getCustomBaseName(origName, getMeta(origName)) : '';
+            if (fBase === origBase || fBase.startsWith(origBase + '_') || fBase.startsWith(origBase + '-') || fBase.startsWith(origBase + '__') || fBase.indexOf('__' + origBase) >= 0 || (customBase && (fBase === customBase || fBase.startsWith(customBase + '_')))) {
               toRemove.push(fname);
             } else {
               var fInfo = parseFilePrefixAndLocation(fname, '');
+              var towerMatch = fInfo.tower && origInfo.tower && (fInfo.tower === origInfo.tower || fInfo.tower.startsWith(origInfo.tower + '-') || fInfo.tower.startsWith(origInfo.tower + '~'));
               if (fInfo.prefix && origInfo.prefix && fInfo.prefix === origInfo.prefix &&
-                  fInfo.tower && origInfo.tower && fInfo.tower === origInfo.tower &&
+                  towerMatch &&
                   fInfo.loc && origInfo.loc && (fInfo.loc === origInfo.loc || fInfo.loc.startsWith(origInfo.loc))) {
                 toRemove.push(fname);
               }
@@ -6399,6 +6421,71 @@
     return false;
   }
 
+  /* ================= 裸导线区段与命名辅助 ================= */
+
+  function isSectionRange(str) {
+    if (!str) return false;
+    if ((str.match(/#/g) || []).length >= 2) return true;
+    if (/^#?\d{2,}[-_~]#?\d{2,}$/.test(str)) return true;
+    if (/^#?\d+[-_]\d+[-_~]#?\d+/.test(str)) return true;
+    return false;
+  }
+
+  function suggestSection(tower, nextTower) {
+    if (nextTower && tower && tower !== nextTower && tower !== '默认杆塔' && nextTower !== '默认杆塔') {
+      var pNext = nextTower.startsWith('#') ? nextTower : ('#' + nextTower);
+      var pCur = tower.startsWith('#') ? tower : ('#' + tower);
+      return pCur + '-' + pNext;
+    }
+    if (!tower || tower === '默认杆塔') return '#001-#002';
+    if (isSectionRange(tower)) return tower;
+    var prefix = tower.startsWith('#') ? '#' : '';
+    var mSub = tower.match(/^#?(\d+)[-_](\d+)$/);
+    if (mSub) {
+      var mainNum = mSub[1];
+      var subNum = parseInt(mSub[2], 10);
+      return prefix + mainNum + '-' + subNum + '-' + prefix + mainNum + '-' + (subNum + 1);
+    }
+    var mSingle = tower.match(/^#?(\d+)([A-Za-z]?)$/);
+    if (mSingle) {
+      var numStr = mSingle[1];
+      var suffix = mSingle[2] || '';
+      var len = numStr.length;
+      var n = parseInt(numStr, 10);
+      var nextN = String(n + 1);
+      if (len > 1 && nextN.length < len) {
+        nextN = nextN.padStart(len, '0');
+      }
+      return prefix + numStr + suffix + '-' + prefix + nextN + suffix;
+    }
+    return tower + '-';
+  }
+
+  function getCustomBaseName(name, m) {
+    if (!name) return '';
+    var rawBase = name.slice(0, name.lastIndexOf('.'));
+    if (!m || !m.sectionRange) return rawBase;
+    var section = String(m.sectionRange || '').trim();
+    if (!section) return rawBase;
+
+    var f = (state.files && state.files[state.index]) || curFile();
+    var relPath = (f && f.relPath) || '';
+    var parsed = parseFilePrefixAndLocation(name, relPath);
+
+    // 1. 如果原始名包含解析出的杆塔，精准替换为输入区段 (如 10kV周吴115主线_#63-1_大号侧通道 -> 10kV周吴115主线_#63-1-#63-2_大号侧通道)
+    if (parsed.tower && parsed.tower !== '默认杆塔' && rawBase.indexOf(parsed.tower) >= 0) {
+      return rawBase.replace(parsed.tower, section);
+    }
+
+    // 2. 如果不含杆塔名（如大号侧通道.jpg），但能解析出线路名
+    if (parsed.prefix && parsed.prefix !== '默认线路') {
+      var loc = parsed.loc || rawBase;
+      return parsed.prefix + '_' + section + '_' + loc;
+    }
+
+    return section + '_' + rawBase;
+  }
+
   /* ================= 右侧面板：保持简洁纯粹的缺陷分类与命名标签 ================= */
 
   function newNamePreview() {
@@ -6406,7 +6493,7 @@
     if (!name) return { base: '', ext: '', appended: [], full: '' };
     var m = getMeta(name);
     var ext = name.slice(name.lastIndexOf('.'));
-    var base = name.slice(0, name.lastIndexOf('.'));
+    var base = getCustomBaseName(name, m);
 
     var appended = m.appended || [];
     if (appended.length === 0 && !m.isSecondaryEdit && !m.tagsCleared) {
@@ -7901,9 +7988,40 @@
     }
   });
 
-  // 点击预览条中的红色缺陷标签徽章直接撤回/移除
+  // 点击预览条中的红色缺陷标签徽章直接撤回/移除；点击基础名称可手动编辑命名区段
   if (previewEl) {
     previewEl.addEventListener('click', function (e) {
+      var baseEl = e.target.closest('.preview-base');
+      if (baseEl) {
+        var name = curName();
+        if (name) {
+          var f = curFile() || (state.files && state.files[state.index]);
+          var m = getMeta(f || name);
+          var parsed = parseFilePrefixAndLocation(name, (f && f.relPath) || '');
+          var nextTower = '';
+          if (state.files && state.index >= 0 && state.index + 1 < state.files.length) {
+            var nextF = state.files[state.index + 1];
+            var nextParsed = parseFilePrefixAndLocation(nextF.name, nextF.relPath);
+            if (nextParsed && nextParsed.tower && nextParsed.tower !== parsed.tower && nextParsed.tower !== '默认杆塔') {
+              nextTower = nextParsed.tower;
+            }
+          }
+          var defaultSec = m.sectionRange || suggestSection(parsed.tower, nextTower);
+          showPromptDialog({
+            title: '修改照片命名区段',
+            desc: '请输入跨越区段（如 #63-1-#63-2 或 #001-#100），将自动替换杆塔号；若保持原名请清空输入框按回车：',
+            placeholder: '例如：#63-1-#63-2 或 #001-#100',
+            defaultValue: defaultSec
+          }).then(function (secInput) {
+            if (secInput !== null) {
+              m.sectionRange = secInput.trim();
+              renderSide();
+              toast(m.sectionRange ? ('已设置命名区段：' + m.sectionRange) : '已恢复默认杆塔命名');
+            }
+          });
+        }
+        return;
+      }
       var tagEl = e.target.closest('.preview-tag');
       if (tagEl) {
         var idx = parseInt(tagEl.dataset.idx, 10);
@@ -8157,6 +8275,42 @@
     refreshTreeStats();
   }
 
+  async function ensureSectionRangeIfBareWire(f, name, m) {
+    if (!f) return true;
+    var fKey = f.relPath || f.name;
+    var isBareWire = (m.appended && m.appended.some(function (t) { return t.indexOf('裸导线') >= 0; }));
+    if (!isBareWire) {
+      var existingTag = getDefectTagsForFile(fKey) || getDefectTagsForFile(name);
+      if (existingTag && existingTag.indexOf('裸导线') >= 0) {
+        isBareWire = true;
+      }
+    }
+    if (!isBareWire) return true;
+
+    var parsed = parseFilePrefixAndLocation(name, f.relPath);
+    var nextTower = '';
+    if (state.files && state.index >= 0 && state.index + 1 < state.files.length) {
+      var nextF = state.files[state.index + 1];
+      var nextParsed = parseFilePrefixAndLocation(nextF.name, nextF.relPath);
+      if (nextParsed && nextParsed.tower && nextParsed.tower !== parsed.tower && nextParsed.tower !== '默认杆塔') {
+        nextTower = nextParsed.tower;
+      }
+    }
+    var defaultSec = m.sectionRange || suggestSection(parsed.tower, nextTower);
+    var secInput = await showPromptDialog({
+      title: '裸导线区段命名',
+      desc: '检测到当前标记了「裸导线」缺陷。请输入命名区段（如 #63-1-#63-2 或 #001-#100），将自动替换杆塔号；若保持原名请清空输入框按回车：',
+      placeholder: '例如：#63-1-#63-2 或 #001-#100',
+      defaultValue: defaultSec
+    });
+    if (secInput === null) {
+      return false; // 用户取消保存
+    }
+    m.sectionRange = secInput.trim();
+    renderSide();
+    return true;
+  }
+
   async function saveBothFolders() {
     var name = curName();
     if (!name) { toast('未打开任何图片'); return; }
@@ -8189,6 +8343,10 @@
       var confirmed = await showConfirmDialog('保存提示确认', warnMsg);
       if (!confirmed) return;
     }
+
+    // 裸导线区段输入拦截提示
+    var secOk = await ensureSectionRangeIfBareWire(f, name, m);
+    if (!secOk) return;
 
     var nv = newNamePreview();
     var outFileName = nv.full;
@@ -8384,6 +8542,10 @@
       var confirmed = await showConfirmDialog('保存提示确认', '当前图片【尚未圈示红框】，确定要直接将圈示图保存到「危急缺陷」文件夹吗？');
       if (!confirmed) return;
     }
+
+    // 裸导线区段输入拦截提示
+    var secOk = await ensureSectionRangeIfBareWire(f, name, m);
+    if (!secOk) return;
 
     var nv = newNamePreview();
     var outFileName = nv.full;
