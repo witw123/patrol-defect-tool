@@ -6472,18 +6472,71 @@
     var relPath = (f && f.relPath) || '';
     var parsed = parseFilePrefixAndLocation(name, relPath);
 
-    // 1. 如果原始名包含解析出的杆塔，精准替换为输入区段 (如 10kV周吴115主线_#63-1_大号侧通道 -> 10kV周吴115主线_#63-1-#63-2_大号侧通道)
+    // 1. 如果原始名已包含区段格式（如 #001-#002 或 #63-1-#63-2），整段优先替换
+    var secRegex = /#?\d+(?:[-_]\d+)?[-_~]#?\d+(?:[-_]\d+)?/;
+    if (secRegex.test(rawBase)) {
+      return rawBase.replace(secRegex, section);
+    }
+
+    // 2. 如果原始名包含解析出的杆塔名，精准替换为输入区段 (如 10kV周吴115主线_#63-1_大号侧通道 -> 10kV周吴115主线_#001-#100_大号侧通道)
     if (parsed.tower && parsed.tower !== '默认杆塔' && rawBase.indexOf(parsed.tower) >= 0) {
       return rawBase.replace(parsed.tower, section);
     }
 
-    // 2. 如果不含杆塔名（如大号侧通道.jpg），但能解析出线路名
+    // 3. 如果包含下划线/空格隔开的杆塔编号（如 _001_ 或 #001_）
+    var towerBare = (parsed.tower || '').replace(/^#/, '');
+    if (towerBare) {
+      var segRegex = new RegExp('([_\\s])#?' + towerBare + '([_\\s]|$)', 'i');
+      if (segRegex.test(rawBase)) {
+        return rawBase.replace(segRegex, function(m0, p1, p2) { return p1 + section + p2; });
+      }
+    }
+
+    // 4. 如果不含杆塔名（如大号侧通道.jpg），但能解析出线路名
     if (parsed.prefix && parsed.prefix !== '默认线路') {
       var loc = parsed.loc || rawBase;
       return parsed.prefix + '_' + section + '_' + loc;
     }
 
     return section + '_' + rawBase;
+  }
+
+  async function promptBareWireSection(name, m, isSaving) {
+    if (!name || !m) return true;
+    var f = curFile() || (state.files && state.files[state.index]);
+    var relPath = (f && f.relPath) || '';
+    var parsed = parseFilePrefixAndLocation(name, relPath);
+    var nextTower = '';
+    if (state.files && state.index >= 0 && state.index + 1 < state.files.length) {
+      var nextF = state.files[state.index + 1];
+      var nextParsed = parseFilePrefixAndLocation(nextF.name, nextF.relPath);
+      if (nextParsed && nextParsed.tower && nextParsed.tower !== parsed.tower && nextParsed.tower !== '默认杆塔') {
+        nextTower = nextParsed.tower;
+      }
+    }
+    var defaultSec = m.sectionRange || suggestSection(parsed.tower, nextTower);
+
+    var descText = isSaving
+      ? '检测到当前保存的图片已标记「裸导线」缺陷。请输入命名区段（如：#001-#100），将自动替换杆塔号；直接回车确认保存：'
+      : '检测到当前标记了「裸导线」缺陷。请输入命名区段（如：#001-#100），将自动替换文件名中的杆塔号；若保持原名请直接回车：';
+
+    var secInput = await showPromptDialog({
+      title: '裸导线区段命名',
+      desc: descText,
+      placeholder: '例如：#001-#100 或 #63-1-#63-2',
+      defaultValue: defaultSec
+    });
+
+    if (secInput === null) {
+      return false; // 用户取消
+    }
+
+    m.sectionRange = secInput.trim();
+    renderSide();
+    if (m.sectionRange) {
+      toast('✓ 已设置命名区段：' + m.sectionRange);
+    }
+    return true;
   }
 
   /* ================= 右侧面板：保持简洁纯粹的缺陷分类与命名标签 ================= */
@@ -6547,6 +6600,11 @@
     updateTreeCurrentDefectTag(name, allTags);
     updateHud();
     flashItem(t);
+
+    // 标记裸导线缺陷时立即提示可手动输入命名区段如：#001-#100
+    if (t.indexOf('裸导线') >= 0) {
+      promptBareWireSection(name, m, false);
+    }
   }
   function flashItem(t) {
     var els = sideScroll.querySelectorAll('.def-item .t');
