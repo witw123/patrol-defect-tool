@@ -8497,9 +8497,16 @@
     selectedIndex = -1;
     updateTreeCurrentDefectTag(name, '');
 
-    // 二次编辑时切回纯净原图以供重新圈示
-    if (fKey) state.cache.delete(fKey);
-    state.cache.delete(name);
+    // 二次编辑时切回纯净原图以供重新圈示：彻底释放旧圈示图显存与在途任务
+    var oldC1 = fKey ? state.cache.get(fKey) : null;
+    if (oldC1) { disposeCacheItem(oldC1); state.cache.delete(fKey); }
+    var oldC2 = state.cache.get(name);
+    if (oldC2) { disposeCacheItem(oldC2); state.cache.delete(name); }
+
+    inFlightImagePromises.delete(fKey + '_auto');
+    inFlightImagePromises.delete(fKey + '_clean');
+    inFlightImagePromises.delete(name + '_auto');
+    inFlightImagePromises.delete(name + '_clean');
     loadingEl.style.display = '';
     try {
       var c = await getImage(state.index, true);
