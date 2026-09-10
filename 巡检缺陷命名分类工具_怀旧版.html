@@ -3136,6 +3136,18 @@
     return { img: img, url: url };
   }
 
+  function getImgSize(cOrImg) {
+    if (!cOrImg) return { w: 0, h: 0 };
+    if (cOrImg.img) {
+      var w = cOrImg.naturalWidth || cOrImg.width || cOrImg.img.naturalWidth || cOrImg.img.width || 0;
+      var h = cOrImg.naturalHeight || cOrImg.height || cOrImg.img.naturalHeight || cOrImg.img.height || 0;
+      return { w: w, h: h };
+    }
+    var sw = cOrImg.naturalWidth || cOrImg.width || 0;
+    var sh = cOrImg.naturalHeight || cOrImg.height || 0;
+    return { w: sw, h: sh };
+  }
+
   function loadImageElement(url) {
     return new Promise(function (resolve, reject) {
       var img = new Image();
@@ -3392,10 +3404,15 @@
   function computeFit(nw, nh) {
     var container = $('stageContainer') || viewer;
     var pad = 6;
-    var availW = Math.max(10, container.clientWidth - pad * 2);
-    var availH = Math.max(10, container.clientHeight - pad * 2);
+    var availW = Math.max(10, (container ? container.clientWidth : 0) - pad * 2);
+    var availH = Math.max(10, (container ? container.clientHeight : 0) - pad * 2);
     if (!nw || !nh || nw <= 0 || nh <= 0) {
-      return { w: 100, h: 100, s: 1 };
+      if (state.natural && state.natural.w > 0 && state.natural.h > 0) {
+        nw = state.natural.w;
+        nh = state.natural.h;
+      } else {
+        return { w: 100, h: 100, s: 1 };
+      }
     }
     var s = Math.min(availW / nw, availH / nh);
     return { w: Math.round(nw * s), h: Math.round(nh * s), s: s };
@@ -3699,13 +3716,16 @@
             try {
               var newC = await getImage(state.index, wantClean);
               if (newC && newC.img) {
-                state.natural = { w: newC.img.naturalWidth, h: newC.img.naturalHeight };
-                var nFit = computeFit(newC.img.naturalWidth, newC.img.naturalHeight);
-                fitView(nFit.w, nFit.h, nFit.s);
-                render(newC.img);
-                renderSide();
-                updateHud();
-                toast(wantClean ? '已切换至纯净原图' : '已切换至缺陷圈示图');
+                var size = getImgSize(newC);
+                if (size.w > 0 && size.h > 0) {
+                  state.natural = { w: size.w, h: size.h };
+                  var nFit = computeFit(size.w, size.h);
+                  fitView(nFit.w, nFit.h, nFit.s);
+                  render(newC.img);
+                  renderSide();
+                  updateHud();
+                  toast(wantClean ? '已切换至纯净原图' : '已切换至缺陷圈示图');
+                }
               }
             } catch (err) {
               toast('切换视图失败：' + (err && err.message || err));
@@ -4020,12 +4040,15 @@
       if (state.index >= 0 && state.files[state.index]) {
         try {
           var curImgObj = await getImage(state.index);
-          if (curImgObj && curImgObj.img && curImgObj.img.naturalWidth > 0) {
-            state.natural = { w: curImgObj.img.naturalWidth, h: curImgObj.img.naturalHeight };
-            var fit = computeFit(curImgObj.img.naturalWidth, curImgObj.img.naturalHeight);
-            fitView(fit.w, fit.h, fit.s);
-            render();
-            updateHud();
+          if (curImgObj && curImgObj.img) {
+            var size = getImgSize(curImgObj);
+            if (size.w > 0 && size.h > 0) {
+              state.natural = { w: size.w, h: size.h };
+              var fit = computeFit(size.w, size.h);
+              fitView(fit.w, fit.h, fit.s);
+              render(curImgObj.img);
+              updateHud();
+            }
           }
         } catch (e) {}
         schedulePreload(state.index);
@@ -5866,10 +5889,15 @@
       updateHud();
       renderSide();
       getImage(idx).then(function (c) {
-        state.natural = { w: c.img.naturalWidth, h: c.img.naturalHeight };
-        var fit = computeFit(c.img.naturalWidth, c.img.naturalHeight);
-        fitView(fit.w, fit.h, fit.s);
-        render();
+        if (c && c.img) {
+          var size = getImgSize(c);
+          if (size.w > 0 && size.h > 0) {
+            state.natural = { w: size.w, h: size.h };
+            var fit = computeFit(size.w, size.h);
+            fitView(fit.w, fit.h, fit.s);
+            render(c.img);
+          }
+        }
       }).catch(function () {});
 
       var oldActiveItem = pathTree.querySelector('.loc-item.current');
@@ -8289,8 +8317,10 @@
       };
       if (fKey) state.cache.set(fKey, cachedObj);
       state.cache.set(name, cachedObj);
-      state.natural = { w: boxedImg.naturalWidth, h: boxedImg.naturalHeight };
-      render();
+      var bw = boxedImg.naturalWidth || boxedImg.width || (state.natural ? state.natural.w : 0);
+      var bh = boxedImg.naturalHeight || boxedImg.height || (state.natural ? state.natural.h : 0);
+      state.natural = { w: bw, h: bh };
+      render(boxedImg);
       renderSide();
       invalidateFilterList();
       updateHud();
@@ -8401,8 +8431,10 @@
       };
       if (fKey) state.cache.set(fKey, cachedObj);
       state.cache.set(name, cachedObj);
-      state.natural = { w: boxedImg.naturalWidth, h: boxedImg.naturalHeight };
-      render();
+      var bw2 = boxedImg.naturalWidth || boxedImg.width || (state.natural ? state.natural.w : 0);
+      var bh2 = boxedImg.naturalHeight || boxedImg.height || (state.natural ? state.natural.h : 0);
+      state.natural = { w: bw2, h: bh2 };
+      render(boxedImg);
       invalidateFilterList();
       updateHud();
       renderSide();
@@ -8471,10 +8503,15 @@
     loadingEl.style.display = '';
     try {
       var c = await getImage(state.index, true);
-      state.natural = { w: c.img.naturalWidth, h: c.img.naturalHeight };
-      var fit = computeFit(c.img.naturalWidth, c.img.naturalHeight);
-      fitView(fit.w, fit.h, fit.s);
-      render();
+      if (c && c.img) {
+        var size = getImgSize(c);
+        if (size.w > 0 && size.h > 0) {
+          state.natural = { w: size.w, h: size.h };
+          var fit = computeFit(size.w, size.h);
+          fitView(fit.w, fit.h, fit.s);
+          render(c.img);
+        }
+      }
     } catch (err) {} finally {
       loadingEl.style.display = 'none';
     }
