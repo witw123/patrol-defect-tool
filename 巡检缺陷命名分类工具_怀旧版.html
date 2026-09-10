@@ -3192,7 +3192,7 @@
     if (!f) return null;
     var key = fileKey(f);
     var c = state.cache.get(key) || state.cache.get(f.name);
-    var isMarked = !preferClean && !!(state.markedFiles && (state.markedFiles.has(key) || state.markedFiles.has(f.name))) && !!(state.markedBoxedHandles && (state.markedBoxedHandles.has(key) || state.markedBoxedHandles.has(f.name)));
+    var isMarked = !preferClean && !!(state.markedFiles && state.markedFiles.has(key)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(key));
 
     var isCachedValid = c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0)) && (c.img.complete !== false);
     if (isCachedValid) {
@@ -3220,7 +3220,7 @@
         var isBoxedImg = false;
         if (isMarked) {
           try {
-            var boxedHandle = state.markedBoxedHandles.get(key) || state.markedBoxedHandles.get(f.name);
+            var boxedHandle = state.markedBoxedHandles.get(key);
             if (boxedHandle) {
               blob = await boxedHandle.getFile();
               isBoxedImg = true;
@@ -3584,8 +3584,8 @@
     if (idx < 0 || !state.files || idx >= state.files.length) return false;
     if (filterMode === 'all') return true;
     var f = state.files[idx];
-    var fKey = f.relPath || f.name;
-    var isMarked = !!(state.markedFiles && (state.markedFiles.has(fKey) || state.markedFiles.has(f.name)));
+    var fKey = fileKey(f);
+    var isMarked = !!(state.markedFiles && state.markedFiles.has(fKey));
     var isViewed = isFileViewed(f);
     if (filterMode === 'marked') return isMarked;
     if (filterMode === 'unmarked') return !isMarked;
@@ -3669,9 +3669,9 @@
       counter.title = '第 ' + (state.index + 1) + ' / 共 ' + state.files.length + ' 张照片';
     }
 
-    var fKey = f.relPath || f.name;
-    var isCurPhotoMarked = !!(state.markedFiles && (state.markedFiles.has(fKey) || state.markedFiles.has(f.name)));
-    var curDefectTag = isCurPhotoMarked ? (getDefectTagsForFile(fKey) || getDefectTagsForFile(f.name)) : '';
+    var fKey = fileKey(f);
+    var isCurPhotoMarked = !!(state.markedFiles && state.markedFiles.has(fKey));
+    var curDefectTag = isCurPhotoMarked ? getDefectTagsForFile(fKey) : '';
 
     groupTag.textContent = '【' + parsed.prefix + ' · ' + parsed.tower + '】';
     if (curDefectTag) {
@@ -4956,7 +4956,7 @@
       var isViewed = isFileViewed(f);
       if (isViewed) totalViewedPhotos++;
 
-      var fKey = f.relPath || f.name;
+      var fKey = fileKey(f);
       var isPhotoMarked = !!(state.markedFiles && (state.markedFiles.has(fKey) || state.markedFiles.has(f.name)));
       var count = (state.markedCounts && (state.markedCounts.get(fKey) || state.markedCounts.get(f.name))) || (isPhotoMarked ? 1 : 0);
       if (isPhotoMarked) {
@@ -5015,6 +5015,8 @@
       twrData.items.push({
         index: i,
         name: f.name,
+        relPath: f.relPath,
+        key: fKey,
         tower: twr,
         loc: info.loc,
         isViewed: isViewed,
@@ -5164,13 +5166,14 @@
           if (filterMode === 'unviewed' && item.isViewed) continue;
 
           var locIcon = item.isCurrent ? '<span class="loc-current-arrow" style="color:var(--accent);font-size:10px;margin-right:3px">▶</span>' : '';
-          var count = (state.markedCounts && state.markedCounts.get(item.name)) || 1;
-          var markedBadge = item.isPhotoMarked ? ('<span class="item-marked-tag" title="已输出保存为缺陷图片' + (count > 1 ? ('（共 ' + count + ' 处缺陷）') : '') + '">' + markBadgeText(item.name) + '</span>') : '';
-          var deleteMarkedBtn = item.isPhotoMarked ? ('<button class="btn-cancel-marked-mini" data-idx="' + item.index + '" data-raw-name="' + esc(item.name) + '" title="取消已标：删除输出目录中该缺陷图片并还原原图" type="button"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none" style="display:block"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>') : '';
+          var itKey = item.key || item.name;
+          var count = (state.markedCounts && (state.markedCounts.get(itKey) || state.markedCounts.get(item.name))) || 1;
+          var markedBadge = item.isPhotoMarked ? ('<span class="item-marked-tag" title="已输出保存为缺陷图片' + (count > 1 ? ('（共 ' + count + ' 处缺陷）') : '') + '">' + markBadgeText(itKey) + '</span>') : '';
+          var deleteMarkedBtn = item.isPhotoMarked ? ('<button class="btn-cancel-marked-mini" data-idx="' + item.index + '" data-raw-name="' + esc(itKey) + '" title="取消已标：删除输出目录中该缺陷图片并还原原图" type="button"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none" style="display:block"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>') : '';
           var viewedBadge = item.isViewed ? '<span class="item-viewed-tag" title="已浏览查看此照片">已看</span>' : '';
           var statusBadgesHtml = (markedBadge || viewedBadge || deleteMarkedBtn) ? ('<div class="item-status-badges">' + markedBadge + viewedBadge + deleteMarkedBtn + '</div>') : '';
 
-          var defectTag = item.isPhotoMarked ? getDefectTagsForFile(item.name) : '';
+          var defectTag = item.isPhotoMarked ? (getDefectTagsForFile(itKey) || getDefectTagsForFile(item.name)) : '';
           var displayLoc = esc(item.loc);
           if (defectTag) {
             displayLoc += '<span class="item-defect-tag" style="color:var(--accent);font-weight:600">' + esc(defectTag) + '</span>';
@@ -8087,17 +8090,18 @@
   }
 
   function markBadgeText(name) {
-    var c = (state.markedCounts && state.markedCounts.get(name)) || 0;
+    var c = (state.markedCounts && (state.markedCounts.get(name) || (state.files && state.files[state.index] && (state.markedCounts.get(state.files[state.index].relPath) || state.markedCounts.get(state.files[state.index].name))))) || 0;
     return c > 1 ? ('已标*' + c) : '已标';
   }
 
-  function updateTreeAfterSave(name, dTag) {
+  function updateTreeAfterSave(name, dTag, relPath) {
     if (!pathTree) return;
     var curEl = pathTree.querySelector('.loc-item.current');
     if (!curEl) {
       renderPathTree(false);
       return;
     }
+    var itemKey = relPath || name;
 
     // 1. 在当前项徽章中添加或更新“已标”与“删除”按钮
     var badges = curEl.querySelector('.item-status-badges');
@@ -8113,13 +8117,13 @@
       markedSpan.title = '已输出保存为缺陷图片';
       badges.insertBefore(markedSpan, badges.firstChild);
     }
-    markedSpan.textContent = markBadgeText(name);
+    markedSpan.textContent = markBadgeText(itemKey);
 
     if (!badges.querySelector('.btn-cancel-marked-mini')) {
       var delBtn = document.createElement('button');
       delBtn.className = 'btn-cancel-marked-mini';
       delBtn.dataset.idx = state.index;
-      delBtn.dataset.rawName = name;
+      delBtn.dataset.rawName = itemKey;
       delBtn.title = '取消已标：删除输出目录中该缺陷图片并还原原图';
       delBtn.type = 'button';
       delBtn.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none" style="display:block"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
