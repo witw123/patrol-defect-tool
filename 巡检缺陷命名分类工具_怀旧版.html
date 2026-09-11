@@ -2732,39 +2732,72 @@
 
   var towerRegex = /(?:#\s*\d+(?:[-~_]\d+|[A-Za-z])?(?:[-~_]#?\s*\d+(?:[-~_]\d+|[A-Za-z])*)?(?:号?[杆塔基]|#)?|\d+\s*#\s*(?:号?[杆塔基])(?!(?:支线|主线|联络线|专线|回线|线路|线))|\d+\s*#(?![\u4e00-\u9fa5\u2160-\u217fA-Za-z0-9_#]*(?:支线|主线|联络线|专线|回线|线路|线))|\d+\s*号(?:杆塔|[杆塔基])|\d+\s*(?:杆塔|[杆塔基])|第\s*\d+(?:[-~_]\d+|[A-Za-z])?\s*号?[杆塔基]|\d+[-~_]\d+(?:号?[杆塔基]|跨|档)|(?:[PTGNptgn]|Tower|Pole)\s*[-_]?\s*\d+(?:[-~_]\d+|[A-Za-z])?|^\d+(?:[-_]\d+)?$)/i;
 
-  function parseDirToLineAndTower(dirPath, rootLineName) {
-    var rel = String(dirPath || '').replace(/\\/g, '/');
-    var parts = rel.split('/').filter(Boolean);
+  function isTowerFolderName(name) {
+    if (!name) return false;
+    var s = String(name).trim();
+    if (!s) return false;
+    // 排除常见内部非杆塔文件夹（相机内部文件夹、拍摄类别子目录、常见系统文件夹）
+    if (/^(?:DCIM|\d+MEDIA|PANORAMA|PANO|可见光|红外|红外测温|测温|细部|全景|通道|无人机|照片|图片|待检|未检|新建文件夹|其他|其它)$/i.test(s)) return false;
+    // 排除线路文件夹名（包含主线/支线/联络线/专线/线路等，或带电压等级如 10kV）
+    if (/(?:支线|主线|联络线|专线|回线|备用线|电缆线|线路|工程)/.test(s)) return false;
+    if (/(?:10|35|110|220|500|750|1000)\s*(?:k|kV|KV|千伏)/i.test(s)) return false;
+    return towerRegex.test(s);
+  }
+
+  function extractLineAndTowerFromDirParts(dirParts, rootLineName) {
     var line = '';
     var tower = '';
     var rootName = rootLineName || savedInputName || (lastInputHandle && lastInputHandle.name) || '默认线路';
 
-    if (parts.length >= 2) {
-      var lastDir = parts[parts.length - 1].trim();
-      var parentDir = parts[parts.length - 2].trim();
-      var isLastTower = towerRegex.test(lastDir);
-      var isParentTower = towerRegex.test(parentDir);
-      if (isLastTower) {
-        tower = lastDir;
-        line = parentDir;
-      } else if (isParentTower) {
-        tower = parentDir;
-        line = parts.length >= 3 ? parts[parts.length - 3].trim() : rootName;
-      } else {
-        tower = lastDir;
-        line = parentDir;
-      }
-    } else if (parts.length === 1) {
-      tower = parts[0].trim();
-      line = rootName;
-    } else {
-      tower = '默认杆塔';
-      line = rootName;
+    if (!dirParts || dirParts.length === 0) {
+      return { prefix: rootName, tower: '', towerNum: 999999 };
     }
+
+    // 从后往前寻找第一个满足杆塔命名规则的目录层级
+    var towerIdx = -1;
+    for (var i = dirParts.length - 1; i >= 0; i--) {
+      var seg = dirParts[i].trim();
+      if (isTowerFolderName(seg)) {
+        tower = seg;
+        towerIdx = i;
+        break;
+      }
+    }
+
+    if (towerIdx >= 0) {
+      // 杆塔上方的最近一层目录就是线路名
+      if (towerIdx > 0) {
+        line = dirParts[towerIdx - 1].trim();
+      } else {
+        line = rootName;
+      }
+    } else {
+      // 目录层级中没有显式杆塔：最后一层可能是线路名
+      var lastSeg = dirParts[dirParts.length - 1].trim();
+      var isLine = /(?:支线|主线|联络线|专线|回线|备用线|电缆线|线路|工程)/.test(lastSeg) ||
+                   /(?:10|35|110|220|500|750|1000)\s*(?:k|kV|KV|千伏)/i.test(lastSeg);
+      if (isLine) {
+        line = lastSeg;
+      } else if (dirParts.length >= 2) {
+        line = dirParts[0].trim();
+      } else {
+        line = rootName;
+      }
+      tower = ''; // 留空，以便后续从文件名提取杆塔
+    }
+
     var towerNum = 999999;
-    var numM = tower.match(/\d+/);
-    if (numM) towerNum = parseInt(numM[0], 10);
-    return { prefix: line || '默认线路', tower: tower || '默认杆塔', towerNum: towerNum };
+    if (tower) {
+      var numM = tower.match(/\d+/);
+      if (numM) towerNum = parseInt(numM[0], 10);
+    }
+    return { prefix: line || rootName, tower: tower, towerNum: towerNum };
+  }
+
+  function parseDirToLineAndTower(dirPath, rootLineName) {
+    var rel = String(dirPath || '').replace(/\\/g, '/');
+    var parts = rel.split('/').filter(Boolean);
+    return extractLineAndTowerFromDirParts(parts, rootLineName);
   }
 
   function _rawParseFilePrefixAndLocation(filename, relPath) {
@@ -2773,32 +2806,13 @@
     var rel = String(relPath || filename || '').replace(/\\/g, '/');
     var parts = rel.split('/').filter(Boolean);
     var dirParts = parts.slice(0, -1);
-
-    var line = '';
-    var tower = '';
-    var towerNum = 999999;
     var rootLineName = savedInputName || (lastInputHandle && lastInputHandle.name) || '默认线路';
 
-    // 1. 核心首选：直接以实际文件夹层级结构为准（用户现场规范：线路文件夹 / #001杆塔文件夹 / 照片）
-    if (dirParts.length >= 2) {
-      var lastDir = dirParts[dirParts.length - 1].trim();
-      var parentDir = dirParts[dirParts.length - 2].trim();
-      var isLastTower = towerRegex.test(lastDir);
-      var isParentTower = towerRegex.test(parentDir);
-      if (isLastTower) {
-        tower = lastDir;
-        line = parentDir;
-      } else if (isParentTower) {
-        tower = parentDir;
-        line = dirParts.length >= 3 ? dirParts[dirParts.length - 3].trim() : rootLineName;
-      } else {
-        tower = lastDir;
-        line = parentDir;
-      }
-    } else if (dirParts.length === 1) {
-      tower = dirParts[0].trim();
-      line = rootLineName;
-    }
+    // 1. 核心首选：从实际文件夹层级结构精准提取线路和杆塔
+    var dirParsed = extractLineAndTowerFromDirParts(dirParts, rootLineName);
+    var line = dirParsed.prefix;
+    var tower = dirParsed.tower;
+    var towerNum = dirParsed.towerNum;
 
     // 2. 若目录未体现杆塔，从文件名安全提取杆塔
     if (!tower || tower === '默认杆塔') {
@@ -3198,7 +3212,7 @@
     var f = state.files[index];
     if (!f) return null;
     var key = fileKey(f);
-    var c = state.cache.get(key) || state.cache.get(f.name);
+    var c = state.cache.get(key);
     var isMarked = !preferClean && !!(state.markedFiles && state.markedFiles.has(key)) && !!(state.markedBoxedHandles && state.markedBoxedHandles.has(key));
 
     var isCachedValid = c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0)) && (c.img.complete !== false);
@@ -3206,11 +3220,9 @@
       if (isMarked && !c.isBoxed) {
         disposeCacheItem(c);
         state.cache.delete(key);
-        state.cache.delete(f.name);
       } else if (!isMarked && c.isBoxed) {
         disposeCacheItem(c);
         state.cache.delete(key);
-        state.cache.delete(f.name);
       } else {
         return c;
       }
@@ -3756,7 +3768,7 @@
     }
 
     var fKey = f.relPath || f.name;
-    var isCurPhotoCritical = !!(state.criticalFiles && (state.criticalFiles.has(fKey) || state.criticalFiles.has(f.name)));
+    var isCurPhotoCritical = !!(state.criticalFiles && state.criticalFiles.has(fKey));
     if (sideCurCriticalStatus) {
       if (isCurPhotoCritical) {
         sideCurCriticalStatus.innerHTML = '<span style="color:#d9860f;font-weight:600">已存危急</span> <button id="btnCancelCurrentCritical" class="mini-tool-btn" type="button" style="color:#d9860f;font-size:10px;padding:0 5px;height:18px;margin-left:4px;border-color:#d9860f;display:inline-flex;align-items:center;gap:3px" title="撤回危急缺陷保存，仅从「危急缺陷」文件夹删除对应文件"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none" style="display:block"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>撤回</button>';
@@ -3863,16 +3875,66 @@
     return '其他缺陷';
   }
 
-  function getDefectTagsForFile(name) {
-    if (!name) return '';
-    var m = state.meta.get(name);
+  function getDefectTagsForFile(keyOrFile) {
+    if (!keyOrFile) return '';
+    var key = (typeof keyOrFile === 'object' && keyOrFile) ? fileKey(keyOrFile) : String(keyOrFile);
+    var m = state.meta.get(key);
     if (m && m.appended && m.appended.length > 0) {
       return m.appended.join('');
     }
-    if (state.markedDefectTags && state.markedDefectTags.has(name)) {
-      return state.markedDefectTags.get(name);
+    if (state.markedDefectTags && state.markedDefectTags.has(key)) {
+      return state.markedDefectTags.get(key);
     }
     return '';
+  }
+
+  function findMatchingInputFile(fname) {
+    if (!state.files || state.files.length === 0 || !fname) return null;
+    var ext = fname.slice(fname.lastIndexOf('.')).toLowerCase();
+    var fBase = fname.slice(0, fname.lastIndexOf('.'));
+    var fInfo = parseFilePrefixAndLocation(fname, '');
+
+    var bestFile = null;
+    var bestScore = -1;
+
+    for (var i = 0; i < state.files.length; i++) {
+      var sf = state.files[i];
+      var origName = sf.name;
+      var origExt = origName.slice(origName.lastIndexOf('.')).toLowerCase();
+      if (origExt !== ext) continue;
+
+      var origBase = origName.slice(0, origName.lastIndexOf('.'));
+      var sfInfo = sf._parsedInfo || (sf._parsedInfo = parseFilePrefixAndLocation(sf.name, sf.relPath));
+
+      var score = 0;
+      var nameMatch = (fBase === origBase || fBase.startsWith(origBase + '_') || fBase.startsWith(origBase + '-') || fBase.startsWith(origBase + '__') || fBase.indexOf('__' + origBase) >= 0);
+      if (nameMatch) {
+        score += 100 + origBase.length;
+      }
+
+      var prefixMatch = sfInfo.prefix && fInfo.prefix && (sfInfo.prefix === fInfo.prefix);
+      if (prefixMatch) score += 50;
+
+      var towerMatch = sfInfo.tower && fInfo.tower && (
+        sfInfo.tower === fInfo.tower ||
+        fInfo.tower.startsWith(sfInfo.tower + '-') ||
+        fInfo.tower.startsWith(sfInfo.tower + '~') ||
+        fInfo.tower.indexOf(sfInfo.tower) >= 0
+      );
+      if (towerMatch) score += 50;
+
+      var locMatch = sfInfo.loc && fInfo.loc && (sfInfo.loc === fInfo.loc || fInfo.loc.startsWith(sfInfo.loc) || sfInfo.loc.indexOf(fInfo.loc) >= 0);
+      if (locMatch) score += 30;
+
+      // 判定条件：要么文件名完全前缀匹配且同杆塔，要么同线路同杆塔同位置部件匹配
+      if ((nameMatch && (towerMatch || !fInfo.tower || fInfo.tower === '默认杆塔')) || (prefixMatch && towerMatch && locMatch)) {
+        if (score > bestScore) {
+          bestScore = score;
+          bestFile = sf;
+        }
+      }
+    }
+    return bestFile;
   }
 
   /* 独立扫描「危急缺陷」文件夹，得到已独立保存过危急缺陷的原始文件名集合（与主标记统计完全分离） */
@@ -3895,16 +3957,9 @@
             var fname = entry.name;
             var ext = fname.slice(fname.lastIndexOf('.')).toLowerCase();
             if (IMG_EXTS.indexOf(ext) >= 0 && state.files && state.files.length > 0) {
-              var fBase = fname.slice(0, fname.lastIndexOf('.'));
-              for (var i = 0; i < state.files.length; i++) {
-                var origName = state.files[i].name;
-                var origExt = origName.slice(origName.lastIndexOf('.')).toLowerCase();
-                if (origExt !== ext) continue;
-                var origBase = origName.slice(0, origName.lastIndexOf('.'));
-                if (fBase === origBase || fBase.startsWith(origBase + '_') || fBase.startsWith(origBase + '__') || fBase.indexOf('__' + origBase) >= 0) {
-                  found.add(origName);
-                  break;
-                }
+              var matched = findMatchingInputFile(fname);
+              if (matched) {
+                found.add(fileKey(matched));
               }
             }
           } else if (entry.kind === 'directory') {
@@ -3965,52 +4020,17 @@
             var fname = entry.name;
             var ext = fname.slice(fname.lastIndexOf('.')).toLowerCase();
             if (IMG_EXTS.indexOf(ext) >= 0) {
-              if (state.files && state.files.length > 0) {
-                var fBase = fname.slice(0, fname.lastIndexOf('.'));
-                var matchedOrigName = null;
-                var matchedOrigKey = null;
-                var maxMatchLen = -1;
-                for (var i = 0; i < state.files.length; i++) {
-                  var sf = state.files[i];
-                  var origName = sf.name;
-                  var origExt = origName.slice(origName.lastIndexOf('.')).toLowerCase();
-                  if (origExt !== ext) continue;
-                  var origBase = origName.slice(0, origName.lastIndexOf('.'));
-                  if (fBase === origBase || fBase.startsWith(origBase + '_') || fBase.startsWith(origBase + '__') || fBase.startsWith(origBase + '-') || fBase.indexOf('__' + origBase) >= 0) {
-                    if (origBase.length > maxMatchLen) {
-                      maxMatchLen = origBase.length;
-                      matchedOrigName = origName;
-                      matchedOrigKey = sf.relPath || sf.name;
-                    }
-                  } else {
-                    var fInfo = parseFilePrefixAndLocation(fname, '');
-                    var sfInfo = sf._parsedInfo || (sf._parsedInfo = parseFilePrefixAndLocation(sf.name, sf.relPath));
-                    var towerMatch = sfInfo.tower && fInfo.tower && (sfInfo.tower === fInfo.tower || fInfo.tower.startsWith(sfInfo.tower + '-') || fInfo.tower.startsWith(sfInfo.tower + '~'));
-                    if (sfInfo.prefix && fInfo.prefix && sfInfo.prefix === fInfo.prefix &&
-                        towerMatch &&
-                        sfInfo.loc && fInfo.loc && (sfInfo.loc === fInfo.loc || fInfo.loc.startsWith(sfInfo.loc))) {
-                      if (origBase.length > maxMatchLen) {
-                        maxMatchLen = origBase.length;
-                        matchedOrigName = origName;
-                        matchedOrigKey = sf.relPath || sf.name;
-                      }
-                    }
-                  }
+              var matchedSf = findMatchingInputFile(fname);
+              if (matchedSf) {
+                var matchedKey = fileKey(matchedSf);
+                markedFiles.add(matchedKey);
+                markedCounts.set(matchedKey, (markedCounts.get(matchedKey) || 0) + 1);
+                var dTag = extractDefectTag(matchedSf.name, fname);
+                if (dTag && !markedDefectTags.has(matchedKey)) {
+                  markedDefectTags.set(matchedKey, dTag);
                 }
-                if (matchedOrigName) {
-                  markedFiles.add(matchedOrigName);
-                  if (matchedOrigKey) markedFiles.add(matchedOrigKey);
-                  markedCounts.set(matchedOrigName, (markedCounts.get(matchedOrigName) || 0) + 1);
-                  if (matchedOrigKey) markedCounts.set(matchedOrigKey, (markedCounts.get(matchedOrigKey) || 0) + 1);
-                  var dTag = extractDefectTag(matchedOrigName, fname);
-                  if (dTag && !markedDefectTags.has(matchedOrigName)) {
-                    markedDefectTags.set(matchedOrigName, dTag);
-                    if (matchedOrigKey) markedDefectTags.set(matchedOrigKey, dTag);
-                  }
-                  if (isBoxed) {
-                    markedBoxedHandles.set(matchedOrigName, entry);
-                    if (matchedOrigKey) markedBoxedHandles.set(matchedOrigKey, entry);
-                  }
+                if (isBoxed) {
+                  markedBoxedHandles.set(matchedKey, entry);
                 }
               }
             }
@@ -4143,25 +4163,7 @@
         var bExt = bName.slice(bName.lastIndexOf('.')).toLowerCase();
         var bBase = bName.slice(0, bName.lastIndexOf('.'));
 
-        var matchedOrigF = null;
-        var bInfo = parseFilePrefixAndLocation(bName, '');
-        for (var fi = 0; fi < state.files.length; fi++) {
-          var origF = state.files[fi];
-          var origExt = origF.name.slice(origF.name.lastIndexOf('.')).toLowerCase();
-          if (origExt !== bExt) continue;
-          var origBase = origF.name.slice(0, origF.name.lastIndexOf('.'));
-          if (bBase === origBase || bBase.startsWith(origBase + '_') || bBase.startsWith(origBase + '-') || bBase.startsWith(origBase + '__') || bBase.indexOf('__' + origBase) >= 0) {
-            matchedOrigF = origF;
-            break;
-          }
-          var origInfo = parseFilePrefixAndLocation(origF.name, origF.relPath);
-          if (bInfo.prefix && origInfo.prefix && bInfo.prefix === origInfo.prefix &&
-              bInfo.tower && origInfo.tower && bInfo.tower === origInfo.tower &&
-              bInfo.loc && origInfo.loc && (bInfo.loc === origInfo.loc || bInfo.loc.startsWith(origInfo.loc))) {
-            matchedOrigF = origF;
-            break;
-          }
-        }
+        var matchedOrigF = findMatchingInputFile(bName);
 
         if (matchedOrigF) {
           var cleanBlob = matchedOrigF.file || await matchedOrigF.handle.getFile();
@@ -4174,19 +4176,17 @@
           await w.write(cleanBlob);
           await w.close();
 
+          var mKey = fileKey(matchedOrigF);
           matchedCount++;
           if (state.markedFiles) {
-            state.markedFiles.add(matchedOrigF.name);
-            if (matchedOrigF.relPath) state.markedFiles.add(matchedOrigF.relPath);
+            state.markedFiles.add(mKey);
           }
           if (state.markedCounts) {
-            state.markedCounts.set(matchedOrigF.name, (state.markedCounts.get(matchedOrigF.name) || 0) + 1);
-            if (matchedOrigF.relPath) state.markedCounts.set(matchedOrigF.relPath, (state.markedCounts.get(matchedOrigF.relPath) || 0) + 1);
+            state.markedCounts.set(mKey, (state.markedCounts.get(mKey) || 0) + 1);
           }
           var dTag = extractDefectTag(matchedOrigF.name, bName);
           if (dTag && state.markedDefectTags) {
-            state.markedDefectTags.set(matchedOrigF.name, dTag);
-            if (matchedOrigF.relPath) state.markedDefectTags.set(matchedOrigF.relPath, dTag);
+            state.markedDefectTags.set(mKey, dTag);
           }
         } else {
           notFoundFiles.push(bName);
@@ -4391,17 +4391,22 @@
           var fname = entry.name;
           var ext = fname.slice(fname.lastIndexOf('.')).toLowerCase();
           if (ext === origExt) {
-            var fBase = fname.slice(0, fname.lastIndexOf('.'));
-            var customBase = (typeof getCustomBaseName === 'function') ? getCustomBaseName(origName, getMeta(origName)) : '';
-            if (fBase === origBase || fBase.startsWith(origBase + '_') || fBase.startsWith(origBase + '-') || fBase.startsWith(origBase + '__') || fBase.indexOf('__' + origBase) >= 0 || (customBase && (fBase === customBase || fBase.startsWith(customBase + '_')))) {
-              toRemove.push(fname);
-            } else {
-              var fInfo = parseFilePrefixAndLocation(fname, '');
-              var towerMatch = fInfo.tower && origInfo.tower && (fInfo.tower === origInfo.tower || fInfo.tower.startsWith(origInfo.tower + '-') || fInfo.tower.startsWith(origInfo.tower + '~'));
-              if (fInfo.prefix && origInfo.prefix && fInfo.prefix === origInfo.prefix &&
-                  towerMatch &&
-                  fInfo.loc && origInfo.loc && (fInfo.loc === origInfo.loc || fInfo.loc.startsWith(origInfo.loc))) {
+            var matchedInput = findMatchingInputFile(fname);
+            var targetKey = relPath || origName;
+            if (matchedInput) {
+              if (fileKey(matchedInput) === targetKey) {
                 toRemove.push(fname);
+              }
+            } else {
+              var fBase = fname.slice(0, fname.lastIndexOf('.'));
+              var customBase = (typeof getCustomBaseName === 'function') ? getCustomBaseName(origName, getMeta(origName)) : '';
+              if (customBase && (fBase === customBase || fBase.startsWith(customBase + '_'))) {
+                toRemove.push(fname);
+              } else if (fBase === origBase || fBase.startsWith(origBase + '_') || fBase.indexOf('__' + origBase) >= 0) {
+                var fInfo = parseFilePrefixAndLocation(fname, '');
+                if (!origInfo.tower || origInfo.tower === '默认杆塔' || (fInfo.tower && fInfo.tower === origInfo.tower)) {
+                  toRemove.push(fname);
+                }
               }
             }
           }
@@ -4517,7 +4522,7 @@
     }
 
     var fKey = targetF ? fileKey(targetF) : origName;
-    var isMarked = state.markedFiles && (state.markedFiles.has(fKey) || state.markedFiles.has(origName));
+    var isMarked = !!(state.markedFiles && state.markedFiles.has(fKey));
     if (!isMarked) {
       toast('该图片尚未标记为缺陷图片');
       return;
@@ -4531,11 +4536,11 @@
 
     try {
       // 1. 内存中立即同步清除已标状态与标签（0ms 瞬时响应，绝不让用户等待）
-      if (state.markedFiles) { state.markedFiles.delete(fKey); state.markedFiles.delete(origName); }
-      if (state.markedBoxedHandles) { state.markedBoxedHandles.delete(fKey); state.markedBoxedHandles.delete(origName); }
-      if (state.markedDefectTags) { state.markedDefectTags.delete(fKey); state.markedDefectTags.delete(origName); }
-      if (state.markedCounts) { state.markedCounts.delete(fKey); state.markedCounts.delete(origName); }
-      if (state.criticalFiles) { state.criticalFiles.delete(fKey); state.criticalFiles.delete(origName); }
+      if (state.markedFiles) { state.markedFiles.delete(fKey); }
+      if (state.markedBoxedHandles) { state.markedBoxedHandles.delete(fKey); }
+      if (state.markedDefectTags) { state.markedDefectTags.delete(fKey); }
+      if (state.markedCounts) { state.markedCounts.delete(fKey); }
+      if (state.criticalFiles) { state.criticalFiles.delete(fKey); }
 
       // 2. 清理该照片所有元数据（红框、追加缺陷标签、历史记录、保存标记）
       var m = getMeta(targetF || origName);
@@ -4612,6 +4617,7 @@
 
     for (var di = 0; di < leafDirs.length; di++) {
       var dInfo = parseDirToLineAndTower(leafDirs[di]);
+      if (!dInfo.tower || dInfo.tower === '默认杆塔') continue;
       var dPfx = dInfo.prefix;
       var dTwr = dInfo.tower;
 
@@ -4647,9 +4653,9 @@
       var pfx = info.prefix;
       var twr = info.tower;
       var isViewed = isFileViewed(f);
-      var fKey = f.relPath || f.name;
-      var isPhotoMarked = !!(state.markedFiles && (state.markedFiles.has(fKey) || state.markedFiles.has(f.name)));
-      var count = (state.markedCounts && (state.markedCounts.get(fKey) || state.markedCounts.get(f.name))) || (isPhotoMarked ? 1 : 0);
+      var fKey = fileKey(f);
+      var isPhotoMarked = !!(state.markedFiles && state.markedFiles.has(fKey));
+      var count = (state.markedCounts && state.markedCounts.get(fKey)) || (isPhotoMarked ? 1 : 0);
 
       if (isViewed) totalViewedPhotos++;
       if (isPhotoMarked) {
@@ -4889,8 +4895,8 @@
     if (btnFilterUnviewed) btnFilterUnviewed.textContent = '未看 (' + (s.totalPhotos - s.totalViewedPhotos) + ')';
   }
 
-  function updateStatsOnPhotoViewed(curFileObj) {
-    if (!curFileObj || !state.treeStats) return;
+  function updateStatsOnPhotoViewed(curFileObj, isNewView) {
+    if (!curFileObj || !state.treeStats || !isNewView) return;
     var info = curFileObj._parsedInfo || (curFileObj._parsedInfo = parseFilePrefixAndLocation(curFileObj.name, curFileObj.relPath));
     var fullTwrKey = info ? (info.prefix + ':::' + info.tower) : '';
     var s = state.treeStats;
@@ -4899,7 +4905,7 @@
     if (tObj) {
       tObj.viewedPhotos++;
       if (tObj.viewedPhotos === 1) s.totalStartedTowers++;
-      if (tObj.viewedPhotos === tObj.total && tObj.total > 0) s.totalFullyViewedTowers++;
+      if (tObj.viewedPhotos >= tObj.total && tObj.total > 0) s.totalFullyViewedTowers++;
       updateSingleTowerViewedBadge(fullTwrKey, tObj);
     }
     updateTopSummaryText();
@@ -4935,6 +4941,7 @@
 
     for (var di = 0; di < leafDirs.length; di++) {
       var dInfo = parseDirToLineAndTower(leafDirs[di]);
+      if (!dInfo.tower || dInfo.tower === '默认杆塔') continue;
       var dPfx = dInfo.prefix;
       var dTwr = dInfo.tower;
 
@@ -4979,8 +4986,8 @@
       if (isViewed) totalViewedPhotos++;
 
       var fKey = fileKey(f);
-      var isPhotoMarked = !!(state.markedFiles && (state.markedFiles.has(fKey) || state.markedFiles.has(f.name)));
-      var count = (state.markedCounts && (state.markedCounts.get(fKey) || state.markedCounts.get(f.name))) || (isPhotoMarked ? 1 : 0);
+      var isPhotoMarked = !!(state.markedFiles && state.markedFiles.has(fKey));
+      var count = (state.markedCounts && state.markedCounts.get(fKey)) || (isPhotoMarked ? 1 : 0);
       if (isPhotoMarked) {
         totalMarkedPhotos++;
         totalDefects += count;
@@ -5081,6 +5088,7 @@
     var totalTowers = 0;
     var totalFullyViewedTowers = 0;
     var totalStartedTowers = 0;
+    var fastTowersMap = new Map();
 
     for (var gi = 0; gi < groupOrder.length; gi++) {
       var pKey = groupOrder[gi];
@@ -5091,6 +5099,8 @@
         var tKey = gObj.towerOrder[ti];
         var tObj = gObj.towersMap.get(tKey);
         totalTowers++;
+        var fullKey = pKey + ':::' + tKey;
+        fastTowersMap.set(fullKey, tObj);
         if (tObj.viewedPhotos >= tObj.total && tObj.total > 0) {
           lineFullyViewedTowers++;
           totalFullyViewedTowers++;
@@ -5105,6 +5115,19 @@
     }
 
     var totalLines = groupOrder.length;
+
+    // 同步更新全局 state.treeStats，确保全系统单源真实数据
+    state.treeStats = {
+      totalPhotos: totalPhotos,
+      totalViewedPhotos: totalViewedPhotos,
+      totalMarkedPhotos: totalMarkedPhotos,
+      totalDefects: totalDefects,
+      totalLines: totalLines,
+      totalTowers: totalTowers,
+      totalFullyViewedTowers: totalFullyViewedTowers,
+      totalStartedTowers: totalStartedTowers,
+      towersMap: fastTowersMap
+    };
 
     // 统计栏：已看统计杆塔数而不是图片数，已标统计独立图片数与缺陷总数
     var viewedTowerStr = totalFullyViewedTowers + '/' + totalTowers;
@@ -5189,13 +5212,13 @@
 
           var locIcon = item.isCurrent ? '<span class="loc-current-arrow" style="color:var(--accent);font-size:10px;margin-right:3px">▶</span>' : '';
           var itKey = item.key || item.name;
-          var count = (state.markedCounts && (state.markedCounts.get(itKey) || state.markedCounts.get(item.name))) || 1;
+          var count = (state.markedCounts && state.markedCounts.get(itKey)) || 1;
           var markedBadge = item.isPhotoMarked ? ('<span class="item-marked-tag" title="已输出保存为缺陷图片' + (count > 1 ? ('（共 ' + count + ' 处缺陷）') : '') + '">' + markBadgeText(itKey) + '</span>') : '';
           var deleteMarkedBtn = item.isPhotoMarked ? ('<button class="btn-cancel-marked-mini" data-idx="' + item.index + '" data-raw-name="' + esc(itKey) + '" title="取消已标：删除输出目录中该缺陷图片并还原原图" type="button"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2" fill="none" style="display:block"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>') : '';
           var viewedBadge = item.isViewed ? '<span class="item-viewed-tag" title="已浏览查看此照片">已看</span>' : '';
           var statusBadgesHtml = (markedBadge || viewedBadge || deleteMarkedBtn) ? ('<div class="item-status-badges">' + markedBadge + viewedBadge + deleteMarkedBtn + '</div>') : '';
 
-          var defectTag = item.isPhotoMarked ? (getDefectTagsForFile(itKey) || getDefectTagsForFile(item.name)) : '';
+          var defectTag = item.isPhotoMarked ? getDefectTagsForFile(itKey) : '';
           var displayLoc = esc(item.loc);
           if (defectTag) {
             displayLoc += '<span class="item-defect-tag" style="color:var(--accent);font-weight:600">' + esc(defectTag) + '</span>';
@@ -5384,11 +5407,11 @@
       viewedTag.title = '已浏览查看此照片';
       viewedTag.textContent = '已看';
       badges.appendChild(viewedTag);
+      updateStatsOnPhotoViewed(curFileObj, true);
     }
 
     if (isNewView && filterMode === 'unviewed') {
       targetEl.style.display = 'none';
-      updateStatsOnPhotoViewed(curFileObj);
       return;
     }
 
@@ -5823,9 +5846,11 @@
     }
 
     // 2. 更新内存数据结构
+    var oldFKey = fileKey({ name: oldName, relPath: f.relPath });
     f.name = newFileName;
     var parentDir = dirOf(f.relPath || '');
     f.relPath = (parentDir ? (parentDir + '/') : '') + newFileName;
+    var newFKey = fileKey(f);
     f.mime = mimeOf(newFileName);
 
     state.byName.delete(oldName);
@@ -5839,36 +5864,63 @@
       state.meta.delete(oldName);
       state.meta.set(newFileName, metaVal);
     }
+    if (state.meta.has(oldFKey)) {
+      var metaFVal = state.meta.get(oldFKey);
+      state.meta.delete(oldFKey);
+      state.meta.set(newFKey, metaFVal);
+    }
 
+    if (state.cache.has(oldFKey)) {
+      var cacheVal = state.cache.get(oldFKey);
+      state.cache.delete(oldFKey);
+      state.cache.set(newFKey, cacheVal);
+    }
     if (state.cache.has(oldName)) {
-      var cacheVal = state.cache.get(oldName);
+      var cacheOldVal = state.cache.get(oldName);
       state.cache.delete(oldName);
-      state.cache.set(newFileName, cacheVal);
+      state.cache.set(newFKey, cacheOldVal);
     }
 
     if (viewedPhotosMap[oldName]) {
       delete viewedPhotosMap[oldName];
       viewedPhotosMap[newFileName] = true;
     }
+    if (viewedPhotosMap[oldFKey]) {
+      delete viewedPhotosMap[oldFKey];
+      viewedPhotosMap[newFKey] = true;
+    }
+    if (state.viewedPhotos && state.viewedPhotos.has(oldFKey)) {
+      state.viewedPhotos.delete(oldFKey);
+      state.viewedPhotos.add(newFKey);
+    }
 
-    if (state.markedFiles && state.markedFiles.has(oldName)) {
+    if (state.markedFiles && (state.markedFiles.has(oldFKey) || state.markedFiles.has(oldName))) {
+      state.markedFiles.delete(oldFKey);
       state.markedFiles.delete(oldName);
-      state.markedFiles.add(newFileName);
+      state.markedFiles.add(newFKey);
     }
-    if (state.markedBoxedHandles && state.markedBoxedHandles.has(oldName)) {
-      var bh = state.markedBoxedHandles.get(oldName);
+    if (state.markedBoxedHandles && (state.markedBoxedHandles.has(oldFKey) || state.markedBoxedHandles.has(oldName))) {
+      var bh = state.markedBoxedHandles.get(oldFKey) || state.markedBoxedHandles.get(oldName);
+      state.markedBoxedHandles.delete(oldFKey);
       state.markedBoxedHandles.delete(oldName);
-      state.markedBoxedHandles.set(newFileName, bh);
+      state.markedBoxedHandles.set(newFKey, bh);
     }
-    if (state.markedDefectTags && state.markedDefectTags.has(oldName)) {
-      var dtag = state.markedDefectTags.get(oldName);
+    if (state.markedDefectTags && (state.markedDefectTags.has(oldFKey) || state.markedDefectTags.has(oldName))) {
+      var dtag = state.markedDefectTags.get(oldFKey) || state.markedDefectTags.get(oldName);
+      state.markedDefectTags.delete(oldFKey);
       state.markedDefectTags.delete(oldName);
-      state.markedDefectTags.set(newFileName, dtag);
+      state.markedDefectTags.set(newFKey, dtag);
     }
-    if (state.markedCounts && state.markedCounts.has(oldName)) {
-      var mcnt = state.markedCounts.get(oldName);
+    if (state.markedCounts && (state.markedCounts.has(oldFKey) || state.markedCounts.has(oldName))) {
+      var mcnt = state.markedCounts.get(oldFKey) || state.markedCounts.get(oldName);
+      state.markedCounts.delete(oldFKey);
       state.markedCounts.delete(oldName);
-      state.markedCounts.set(newFileName, mcnt);
+      state.markedCounts.set(newFKey, mcnt);
+    }
+    if (state.criticalFiles && (state.criticalFiles.has(oldFKey) || state.criticalFiles.has(oldName))) {
+      state.criticalFiles.delete(oldFKey);
+      state.criticalFiles.delete(oldName);
+      state.criticalFiles.add(newFKey);
     }
 
     // 3. 刷新视图
@@ -6037,7 +6089,7 @@
       if (state.files && state.files[idx]) {
         var fObj = state.files[idx];
         var fk = fileKey(fObj);
-        if (state.markedFiles && (state.markedFiles.has(fk) || state.markedFiles.has(fObj.name))) {
+        if (state.markedFiles && state.markedFiles.has(fk)) {
           e.preventDefault();
           cancelMarkedDefect(idx);
         }
@@ -6172,7 +6224,6 @@
     updateHud();
     renderSide();
     updatePathTreeSelection(index, true);
-    updateStatsOnPhotoViewed(state.files[index]);
   }
 
   async function switchTo(index, force) {
@@ -6592,9 +6643,11 @@
     if (m.appended.indexOf(t) >= 0) { toast('已追加过该缺陷'); return; }
     m.appended.push(t);
     m.history.push({ type: 'name', tag: t });
+    var f = curFile();
+    var fKey = f ? (f.relPath || f.name) : name;
     var allTags = m.appended.join('');
     if (state.markedDefectTags) {
-      state.markedDefectTags.set(name, allTags);
+      state.markedDefectTags.set(fKey, allTags);
     }
     renderSide();
     updateTreeCurrentDefectTag(name, allTags);
@@ -6705,7 +6758,9 @@
 
     var critBadgeHtml = isAnyCritical ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(220,38,38,0.15);color:#dc2626;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid rgba(220,38,38,0.35);margin-left:6px" title="当前缺陷已被用户设为危急：点击下方「保存缺陷图片」按钮时会自动额外存入「危急缺陷」目录。与右侧独立的「危急缺陷」按钮互不关联">⚠️ 系统判定危急（随主保存自动存入）</span>' : '';
 
-    var criticalSavedBadgeHtml = (state.criticalFiles && state.criticalFiles.has(name)) ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(31,122,60,0.15);color:var(--ok);font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid rgba(31,122,60,0.35);margin-left:6px" title="已通过「危急缺陷」按钮独立保存过该照片">✓ 已存危急缺陷</span>' : '';
+    var f = curFile();
+    var fKey = f ? (f.relPath || f.name) : name;
+    var criticalSavedBadgeHtml = (state.criticalFiles && state.criticalFiles.has(fKey)) ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(31,122,60,0.15);color:var(--ok);font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid rgba(31,122,60,0.35);margin-left:6px" title="已通过「危急缺陷」按钮独立保存过该照片">✓ 已存危急缺陷</span>' : '';
 
     var disp = '<span class="preview-base" title="' + esc(pv.base) + '">' + esc(pv.base) + '</span>' + (tagsHtml || '') + '<span class="preview-ext">' + esc(pv.ext) + '</span>' + critBadgeHtml + criticalSavedBadgeHtml;
     if (previewEl) previewEl.innerHTML = disp;
@@ -8096,11 +8151,13 @@
                 }
               }
             }
+            var f = curFile();
+            var fKey = f ? (f.relPath || f.name) : name;
             if (state.markedDefectTags) {
               if (m.appended.length > 0) {
-                state.markedDefectTags.set(name, m.appended.join(''));
+                state.markedDefectTags.set(fKey, m.appended.join(''));
               } else {
-                state.markedDefectTags.delete(name);
+                state.markedDefectTags.delete(fKey);
               }
             }
             renderSide();
@@ -8265,8 +8322,8 @@
     });
   }
 
-  function markBadgeText(name) {
-    var c = (state.markedCounts && (state.markedCounts.get(name) || (state.files && state.files[state.index] && (state.markedCounts.get(state.files[state.index].relPath) || state.markedCounts.get(state.files[state.index].name))))) || 0;
+  function markBadgeText(key) {
+    var c = (state.markedCounts && state.markedCounts.get(key)) || 0;
     return c > 1 ? ('已标*' + c) : '已标';
   }
 
@@ -8380,7 +8437,7 @@
     var fKey = f.relPath || f.name;
 
     var m = getMeta(f);
-    var c = (fKey && state.cache.get(fKey)) || state.cache.get(name);
+    var c = state.cache.get(fKey);
     if (c && c.relPath && f.relPath && c.relPath !== f.relPath) {
       c = null;
     }
@@ -8418,7 +8475,6 @@
         await deleteExistingDefectOutputs(name, null, f.relPath);
         if (state.criticalFiles) {
           state.criticalFiles.delete(fKey);
-          state.criticalFiles.delete(name);
         }
       }
 
@@ -8499,29 +8555,23 @@
 
       if (state.markedFiles) {
         state.markedFiles.add(fKey);
-        state.markedFiles.add(name);
       }
       if (state.markedBoxedHandles) {
         state.markedBoxedHandles.set(fKey, targetBoxed);
-        state.markedBoxedHandles.set(name, targetBoxed);
       }
       if (state.markedDefectTags && dTag) {
         state.markedDefectTags.set(fKey, dTag);
-        state.markedDefectTags.set(name, dTag);
       }
       if (state.markedCounts) {
         if (isSecondary) {
-          var prevCount = state.markedCounts.get(fKey) || state.markedCounts.get(name) || 1;
+          var prevCount = state.markedCounts.get(fKey) || 1;
           state.markedCounts.set(fKey, prevCount + 1);
-          state.markedCounts.set(name, prevCount + 1);
         } else {
           state.markedCounts.set(fKey, 1);
-          state.markedCounts.set(name, 1);
         }
       }
       if (isCritical && state.criticalFiles) {
         state.criticalFiles.add(fKey);
-        state.criticalFiles.add(name);
       }
 
       // 保存成功后立即在画布上展示烘焙红框的圈示图
@@ -8535,8 +8585,7 @@
         key: fKey,
         isBoxed: true
       };
-      if (fKey) state.cache.set(fKey, cachedObj);
-      state.cache.set(name, cachedObj);
+      state.cache.set(fKey, cachedObj);
       var bw = boxedImg.naturalWidth || boxedImg.width || (state.natural ? state.natural.w : 0);
       var bh = boxedImg.naturalHeight || boxedImg.height || (state.natural ? state.natural.h : 0);
       state.natural = { w: bw, h: bh };
@@ -8589,7 +8638,7 @@
     var fKey = f.relPath || f.name;
 
     var m = getMeta(f);
-    var c = (fKey && state.cache.get(fKey)) || state.cache.get(name);
+    var c = state.cache.get(fKey);
     if (c && c.relPath && f.relPath && c.relPath !== f.relPath) {
       c = null;
     }
@@ -8640,7 +8689,6 @@
       m.boxes = [];
       if (state.criticalFiles) {
         state.criticalFiles.add(fKey);
-        state.criticalFiles.add(name);
       }
 
       var boxedUrl = URL.createObjectURL(boxedBlob);
@@ -8653,8 +8701,7 @@
         key: fKey,
         isBoxed: true
       };
-      if (fKey) state.cache.set(fKey, cachedObj);
-      state.cache.set(name, cachedObj);
+      state.cache.set(fKey, cachedObj);
       var bw2 = boxedImg.naturalWidth || boxedImg.width || (state.natural ? state.natural.w : 0);
       var bh2 = boxedImg.naturalHeight || boxedImg.height || (state.natural ? state.natural.h : 0);
       state.natural = { w: bw2, h: bh2 };
@@ -8677,7 +8724,7 @@
     origName = origName || (f ? f.name : curName());
     if (!origName) { toast('未选择任何图片'); return; }
     var fKey = f ? (f.relPath || f.name) : origName;
-    if (!state.criticalFiles || (!state.criticalFiles.has(fKey) && !state.criticalFiles.has(origName))) {
+    if (!state.criticalFiles || !state.criticalFiles.has(fKey)) {
       toast('该图片尚未独立保存过危急缺陷');
       return;
     }
@@ -8692,7 +8739,6 @@
       var deletedCount = await deleteExistingDefectOutputs(origName, ['危急缺陷'], f ? f.relPath : null);
       if (state.criticalFiles) {
         state.criticalFiles.delete(fKey);
-        state.criticalFiles.delete(origName);
       }
       updateHud();
       renderSide();
@@ -8724,13 +8770,9 @@
     // 二次编辑时切回纯净原图以供重新圈示：彻底释放旧圈示图显存与在途任务
     var oldC1 = fKey ? state.cache.get(fKey) : null;
     if (oldC1) { disposeCacheItem(oldC1); state.cache.delete(fKey); }
-    var oldC2 = state.cache.get(name);
-    if (oldC2) { disposeCacheItem(oldC2); state.cache.delete(name); }
 
     inFlightImagePromises.delete(fKey + '_auto');
     inFlightImagePromises.delete(fKey + '_clean');
-    inFlightImagePromises.delete(name + '_auto');
-    inFlightImagePromises.delete(name + '_clean');
     loadingEl.style.display = '';
     try {
       var c = await getImage(state.index, true);
@@ -8993,7 +9035,9 @@
     if (state.index < 0) return;
     var name = curName();
     if (!name) return;
-    var m = getMeta(name);
+    var f = curFile();
+    var fKey = f ? (f.relPath || f.name) : name;
+    var m = getMeta(f || name);
 
     if (m.history && m.history.length > 0) {
       var lastAct = m.history.pop();
@@ -9001,9 +9045,9 @@
         var removedTag = m.appended.pop();
         if (state.markedDefectTags) {
           if (m.appended.length > 0) {
-            state.markedDefectTags.set(name, m.appended.join(''));
+            state.markedDefectTags.set(fKey, m.appended.join(''));
           } else {
-            state.markedDefectTags.delete(name);
+            state.markedDefectTags.delete(fKey);
           }
         }
         renderSide();
@@ -9028,9 +9072,9 @@
       var remName = m.appended.pop();
       if (state.markedDefectTags) {
         if (m.appended.length > 0) {
-          state.markedDefectTags.set(name, m.appended.join(''));
+          state.markedDefectTags.set(fKey, m.appended.join(''));
         } else {
-          state.markedDefectTags.delete(name);
+          state.markedDefectTags.delete(fKey);
         }
       }
       renderSide();
