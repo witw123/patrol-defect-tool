@@ -12,6 +12,8 @@
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- 将 Windows App SDK 运行时一并发布，用户机器无需安装 Windows App Runtime -->
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
