@@ -49,6 +49,7 @@ jobs:
         shell: pwsh
         run: |
           $version = if ($env:GITHUB_REF_NAME -match '^v(\d[\w.\-]*)$') { $Matches[1] } else { "0.0.0.$($env:GITHUB_SHA.Substring(0,7))" }
+          New-Item -ItemType Directory -Force -Path installer/output | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$version installer\PatrolDefect.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -62,7 +63,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PatrolDefect-Setup
-          path: artifacts/installer/*.exe
+          path: installer/output/*.exe
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -73,5 +74,5 @@ jobs:
           gh release create "$env:GITHUB_REF_NAME" `
             --title "巡检缺陷命名分类工具 $env:GITHUB_REF_NAME" `
             --generate-notes `
-            artifacts/installer/PatrolDefect-Setup-*.exe `
+            installer/output/PatrolDefect-Setup-*.exe `
             artifacts/PatrolDefect-win-x64.zip
