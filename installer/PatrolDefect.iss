@@ -16,7 +16,7 @@ AppVerName={#MyAppName} {#AppVersion}
 DefaultDirName={autopf}\PatrolDefect
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir=artifacts\installer
+OutputDir=..rtifacts\installer
 OutputBaseFilename=PatrolDefect-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
@@ -33,7 +33,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "artifacts\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..rtifacts\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
