@@ -1,0 +1,150 @@
+<Window
+    x:Class="PatrolDefect.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:PatrolDefect.App"
+    Title="巡检缺陷命名分类工具">
+    <Grid x:Name="RootGrid" Padding="16" RowSpacing="12" KeyDown="RootGrid_KeyDown">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Click="OpenFolder_Click">打开照片目录</Button>
+            <Button Click="PrevPhoto_Click" ToolTipService.ToolTip="上一张">上一张</Button>
+            <Button Click="NextPhoto_Click" ToolTipService.ToolTip="下一张">下一张</Button>
+            <Button Click="OutputFolder_Click" ToolTipService.ToolTip="选择成果输出目录">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <SymbolIcon Symbol="Folder"/>
+                    <TextBlock Text="输出目录"/>
+                </StackPanel>
+            </Button>
+            <Button Click="FilterAll_Click">全部</Button>
+            <Button Click="FilterMarked_Click">已标记</Button>
+            <Button Click="FilterUnmarked_Click">未标记</Button>
+            <Button Click="FilterUnviewed_Click">未看</Button>
+            <Button Click="BackToProgress_Click" ToolTipService.ToolTip="返回最后已看照片">
+                <SymbolIcon Symbol="BackToWindow"/>
+            </Button>
+            <Button Click="ResetViewed_Click">重置已看</Button>
+            <Button Click="ExportTemplate_Click" ToolTipService.ToolTip="导出分类与推荐模板">
+                <SymbolIcon Symbol="Save"/>
+            </Button>
+            <Button Click="ImportTemplate_Click" ToolTipService.ToolTip="导入分类与推荐模板">
+                <SymbolIcon Symbol="OpenFile"/>
+            </Button>
+            <Button Click="SyncOutput_Click">刷新输出</Button>
+            <Button Click="ClassifyOutput_Click">一键分类</Button>
+            <Button Click="CompleteOriginals_Click">补全原图</Button>
+            <Button Click="CleanOutputNames_Click">规范命名</Button>
+            <Button Click="Settings_Click">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <SymbolIcon Symbol="Setting"/>
+                    <TextBlock Text="设置"/>
+                </StackPanel>
+            </Button>
+            </StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="FolderText" TextTrimming="CharacterEllipsis" Text="尚未打开项目"/>
+                <TextBlock x:Name="OutputText" TextTrimming="CharacterEllipsis" Text="输出目录未设置"/>
+            </StackPanel>
+        </Grid>
+        <Grid Grid.Row="1" ColumnSpacing="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="LeftColumn" Width="280"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition x:Name="RightColumn" Width="280"/>
+            </Grid.ColumnDefinitions>
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,0,4">
+                    <TextBlock x:Name="TreeSummaryText" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center"/>
+                    <Button Content="展开" Click="ExpandAll_Click" Padding="6,2" FontSize="12"/>
+                    <Button Content="折叠" Click="CollapseAll_Click" Padding="6,2" FontSize="12"/>
+                    <Button Content="自适应" Click="AutoFitWidth_Click" Padding="6,2" FontSize="12"
+                            ToolTipService.ToolTip="根据名称长度自动适配左栏宽度"/>
+                </StackPanel>
+                <TreeView x:Name="PhotoTree" Grid.Row="1" ItemInvoked="PhotoTree_ItemInvoked"/>
+            </Grid>
+            <local:CanvasSurface x:Name="LeftResizer" Grid.Column="1" Width="6" Background="Transparent"/>
+            <Border Grid.Column="2" BorderBrush="Gray" BorderThickness="1">
+                    <local:CanvasSurface x:Name="CanvasHost" Background="#202124"
+                          PointerPressed="CanvasHost_PointerPressed"
+                          PointerMoved="CanvasHost_PointerMoved"
+                          PointerReleased="CanvasHost_PointerReleased"
+                          PointerCanceled="CanvasHost_PointerCanceled"
+                          PointerExited="CanvasHost_PointerExited"
+                          DoubleTapped="CanvasHost_DoubleTapped"
+                          PointerWheelChanged="CanvasHost_PointerWheelChanged">
+                        <Canvas x:Name="ViewportCanvas">
+                            <Image x:Name="PreviewImage" Stretch="Uniform"/>
+                            <Canvas x:Name="MarkCanvas"/>
+                        </Canvas>
+                    </local:CanvasSurface>
+            </Border>
+            <local:CanvasSurface x:Name="RightResizer" Grid.Column="3" Width="6" Background="Transparent"/>
+            <ScrollViewer Grid.Column="4" HorizontalScrollBarVisibility="Disabled" Margin="8,0,0,0">
+            <StackPanel Spacing="8">
+                <TextBlock Text="缺陷信息" FontSize="18"/>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock x:Name="MarkedStatusText" Text="未标记" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                    <Button x:Name="ToggleBaseButton" Click="ToggleBase_Click" Visibility="Collapsed"
+                            Padding="6,2" FontSize="12">
+                        <ToolTipService.ToolTip>切换缺陷圈示图与纯净原图</ToolTipService.ToolTip>
+                        查看原图
+                    </Button>
+                </StackPanel>
+                <Button Click="EditRules_Click" Content="分类与推荐规则"/>
+                <TextBox x:Name="ComponentText" Header="部件" TextChanged="ComponentText_Changed"/>
+                <TextBlock x:Name="RecommendationText" TextWrapping="Wrap" FontSize="12"/>
+                <ComboBox x:Name="CategoryBox" Header="缺陷分类" HorizontalAlignment="Stretch"
+                          SelectionChanged="CategoryBox_Changed"/>
+                <TextBox x:Name="TagSearch" PlaceholderText="搜索缺陷标签" TextChanged="TagSearch_Changed"/>
+                <Button x:Name="RestoreHiddenTagsButton" Click="RestoreHidden_Click" Visibility="Collapsed"
+                        Padding="6,2" FontSize="12">
+                    <ToolTipService.ToolTip>恢复显示全部被隐藏的缺陷标签</ToolTipService.ToolTip>
+                    恢复已隐藏
+                </Button>
+                <ListView x:Name="AvailableTags" MaxHeight="220" SelectionMode="None"
+                          IsItemClickEnabled="True" ItemClick="AvailableTags_Click"/>
+                <TextBlock Text="已选标签" FontWeight="SemiBold"/>
+                <StackPanel x:Name="SelectedTagsPanel" Spacing="4"/>
+                <Grid ColumnSpacing="4">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBox x:Name="DefectText" PlaceholderText="自定义缺陷标签"/>
+                    <Button Grid.Column="1" Click="AddCustomTag_Click" ToolTipService.ToolTip="添加标签"><SymbolIcon Symbol="Add"/></Button>
+                </Grid>
+                <TextBox x:Name="SectionText" Header="裸导线区段" TextChanged="SectionText_Changed"/>
+                <Slider x:Name="StrokeSlider" Header="红框线宽" Minimum="2" Maximum="30" Value="10"
+                        StepFrequency="1" ValueChanged="StrokeSlider_Changed"/>
+                <ComboBox x:Name="ConclusionBox" Header="检查结论"/>
+                <TextBlock x:Name="NamePreview" TextWrapping="Wrap" FontSize="12"/>
+                <Button Click="ClearSecondary_Click">清除并二次编辑</Button>
+                <CheckBox x:Name="CriticalCheck" Content="同时保存到危急缺陷"/>
+                <Button Click="Save_Click">保存当前标注</Button>
+                <Button Click="SaveCriticalOnly_Click"
+                        ToolTipService.ToolTip="独立保存危急缺陷：仅将当前圈示图保存到「危急缺陷」文件夹，与保存当前标注互不影响">
+                    仅保存危急缺陷
+                </Button>
+                <Button Click="CancelMarked_Click">取消当前成果</Button>
+                <Button Click="CancelCritical_Click">撤回危急成果</Button>
+            </StackPanel>
+            </ScrollViewer>
+        </Grid>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="16">
+            <TextBlock x:Name="CounterText" Text="— / —"/>
+            <TextBlock x:Name="StatusText" Text="就绪"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,74 @@
+{
+  "source": "巡检缺陷命名分类工具_怀旧版.html",
+  "sha256": "5b258eb98f4fd5c80161d7ce93847bf56a19f91ca4d0a9b479cd55c760b09c47",
+  "cases": [
+    {
+      "tag": "绝缘破损",
+      "appended": [
+        "螺栓松动"
+      ],
+      "original": "",
+      "output": "",
+      "expected": "其他缺陷",
+      "extracted": ""
+    },
+    {
+      "tag": "绝缘破损",
+      "appended": [
+        ""
+      ],
+      "original": "",
+      "output": "",
+      "expected": "其他缺陷",
+      "extracted": ""
+    },
+    {
+      "tag": "",
+      "appended": [],
+      "original": "绝缘子.jpg",
+      "output": "绝缘子.jpg",
+      "expected": "其他缺陷",
+      "extracted": ""
+    },
+    {
+      "tag": "",
+      "appended": [],
+      "original": "照片.jpg",
+      "output": "照片_导线-裸导线.jpg",
+      "expected": "全绝缘缺陷",
+      "extracted": "_导线-裸导线"
+    },
+    {
+      "tag": "",
+      "appended": [],
+      "original": "照片.jpg",
+      "output": "前缀照片_绝缘破损.jpg",
+      "expected": "全绝缘缺陷",
+      "extracted": "_绝缘破损"
+    },
+    {
+      "tag": "",
+      "appended": [],
+      "original": "旧照片.jpg",
+      "output": "线路__新照片_绝缘破损.jpg",
+      "expected": "全绝缘缺陷",
+      "extracted": "_绝缘破损"
+    },
+    {
+      "tag": "",
+      "appended": null,
+      "original": "",
+      "output": "其他_裸导线.jpg",
+      "expected": "全绝缘缺陷",
+      "extracted": ""
+    },
+    {
+      "tag": "螺栓松动",
+      "appended": [],
+      "original": "",
+      "output": "绝缘破损.jpg",
+      "expected": "其他缺陷",
+      "extracted": ""
+    }
+  ]
+}
