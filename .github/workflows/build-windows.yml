@@ -38,6 +38,13 @@ jobs:
           --self-contained true
           --output artifacts/publish
 
+      - name: Keep Chinese resources only
+        shell: pwsh
+        run: >
+          Get-ChildItem artifacts/publish -Directory |
+          Where-Object { $_.Name -match '^[a-z]{2,3}(-[A-Za-z0-9]+)*$' -and $_.Name -notlike 'zh*' } |
+          Remove-Item -Recurse -Force
+
       - name: Package portable zip
         shell: pwsh
         run: Compress-Archive -Path 'artifacts/publish/*' -DestinationPath 'artifacts/PatrolDefect-win-x64.zip' -Force

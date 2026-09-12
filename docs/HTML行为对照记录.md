@@ -73,9 +73,20 @@ Windows 原生扫描额外跳过 reparse point，避免遍历所选目录之外�
 - `flashSaved`/徽章动效：原生以状态文本与对话框呈现，信息等价、视觉样式不同。
 - `copyAndRemoveDirectoryContents`：属原版磁盘重命名的备用方案，原生 `Directory.Move` 已覆盖。
 
+## 启动与分发验证（2026-09-13）
+
+- 首次人工启动发现致命缺陷：App.xaml 缺少 WinUI 控件库必需的
+  `<muxc:XamlControlsResources/>` 资源字典，任何含 TreeView 等 WinUI 库控件的窗口
+  启动即抛 "Cannot find a Resource with the Name/Key TabViewButtonBackground"。
+  该缺陷自首个版本即存在，此前仅靠自动化测试从未人工运行而未暴露；已在最小复现应用
+  上定位并修复，本机实测窗口可正常启动并持续运行。
+- WindowsAppSDKSelfContained 打包默认携带 84 个语言资源文件夹；
+  发布流水线现在裁剪为仅保留 zh-CN/zh-TW（中文界面所需），裁剪后实测启动正常。
+- 崩溃日志（%LOCALAPPDATA%\PatrolDefect\crash.log）在本次定位中发挥了实际作用。
+
 ## 尚不能宣称完成
 
-- 原生界面人工验收未执行：真实巡检目录与 HTML 输出对比、高 DPI、深色模式、异常文件、
-  数百至上千张照片下的性能验证仍需按 `阶段6-发布与最终验收.md` 逐项进行。
+- 原生界面人工验收刚起步：应用已可启动，但真实巡检目录与 HTML 输出对比、高 DPI、
+  深色模式、异常文件、数百至上千张照片下的性能验证仍需按 `阶段6-发布与最终验收.md` 逐项进行。
 - 排序已扩大到 22 组样例（前导零、杆塔数字、T/Pole 混合、多层嵌套），仍可继续扩充字符边界。
 - 编译通过与测试通过不代表端到端验收完成；总目标继续保持完整原生复刻。

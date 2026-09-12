@@ -1,5 +1,15 @@
 <Application
     x:Class="PatrolDefect.App.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
+    <!-- WinUI 控件库（TreeView 等）必需的主题资源字典，缺失会导致
+         "Cannot find a Resource with the Name/Key TabViewButtonBackground" 启动崩溃 -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <muxc:XamlControlsResources/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
 </Application>
