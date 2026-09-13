@@ -42,9 +42,10 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $version = if ($env:GITHUB_REF_NAME -match '^v(\d[\w.-]*)$') { $Matches[1] } else { "0.0.0-$($env:GITHUB_SHA.Substring(0,7))" }
           Copy-Item src-tauri/target/release/PatrolDefect.exe artifacts/PatrolDefect-win-x64.exe
           Compress-Archive -Path src-tauri/target/release/PatrolDefect.exe -DestinationPath artifacts/PatrolDefect-win-x64.zip -Force
-          Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe artifacts/
+          Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe artifacts/PatrolDefect-Setup-$version-x64.exe
           Get-ChildItem artifacts
 
       - name: Upload portable artifact
