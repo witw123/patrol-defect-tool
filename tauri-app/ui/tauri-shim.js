@@ -12,6 +12,14 @@
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_');
   }
 
+  function bytesToBase64(bytes) {
+    var binary = '';
+    var step = 0x8000;
+    for (var i = 0; i < bytes.length; i += step)
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+    return btoa(binary);
+  }
+
   function b64Decode(base64) {
     var binary = atob(base64);
     var bytes = new Uint8Array(binary.length);
@@ -58,6 +66,7 @@
 
   ShimFileHandle.prototype.createWritable = async function () {
     var path = this.__path;
+    var handleName = this.__name;
     var chunks = [];
     return {
       write: async function (data) {
@@ -72,10 +81,15 @@
         var merged = new Uint8Array(total);
         var offset = 0;
         chunks.forEach(function (c) { merged.set(c, offset); offset += c.length; });
-        await fetch('http://pdefilew.localhost/' + b64urlEncode(path), {
-          method: 'POST',
-          body: merged
-        });
+        await invoke('write_file_base64', { path: path, data: bytesToBase64(merged) });
+        if (handleName === '输出清单.json') {
+          try {
+            await invoke('write_app_file', {
+              name: 'manifest-' + b64urlEncode(parentOf(path)) + '.json',
+              content: new TextDecoder().decode(merged)
+            });
+          } catch (e) { }
+        }
       }
     };
   };
@@ -101,16 +115,27 @@
     });
   }
 
+  // 注意语义区分（与标准 File System Access API 一致）：
+  //   values()  产出句柄
+  //   entries() 产出 [名称, 句柄] 成对数组 —— HTML 的 scanImagesRecursive 依赖此结构
+  function makeChild(dirPath, entry) {
+    var child = joinPath(dirPath, entry.name);
+    return entry.is_dir ? new ShimDirHandle(child) : new ShimFileHandle(child, entry.name);
+  }
+
   ShimDirHandle.prototype.values = async function* () {
     var entries = await invoke('list_entries', { path: this.__path });
     for (var i = 0; i < entries.length; i++) {
-      var entry = entries[i];
-      var child = joinPath(this.__path, entry.name);
-      yield entry.is_dir ? new ShimDirHandle(child) : new ShimFileHandle(child, entry.name);
+      yield makeChild(this.__path, entries[i]);
     }
   };
 
-  ShimDirHandle.prototype.entries = ShimDirHandle.prototype.values;
+  ShimDirHandle.prototype.entries = async function* () {
+    var entries = await invoke('list_entries', { path: this.__path });
+    for (var i = 0; i < entries.length; i++) {
+      yield [entries[i].name, makeChild(this.__path, entries[i])];
+    }
+  };
 
   ShimDirHandle.prototype.getDirectoryHandle = async function (name, options) {
     var child = joinPath(this.__path, name);
@@ -125,11 +150,20 @@
   ShimDirHandle.prototype.getFileHandle = async function (name, options) {
     var child = joinPath(this.__path, name);
     var exists = await invoke('exists', { path: child });
+    if (!exists && name === '输出清单.json') {
+      // 安装目录有镜像而输出目录丢失时，自动还原，保证清单不丢。
+      var mirror = await invoke('read_app_file', {
+        name: 'manifest-' + b64urlEncode(this.__path) + '.json'
+      });
+      if (mirror) {
+        var raw = new TextEncoder().encode(mirror);
+        await invoke('write_file_base64', { path: child, data: bytesToBase64(raw) });
+        exists = true;
+      }
+    }
     if (!exists) {
       if (options && options.create) {
-        await fetch('http://pdefilew.localhost/' + b64urlEncode(child), {
-          method: 'POST', body: new Uint8Array(0)
-        });
+        await invoke('write_file_base64', { path: child, data: '' });
       } else {
         throw new Error('NotFoundError: 文件不存在: ' + name);
       }
@@ -159,7 +193,50 @@
 
   // HTML 中的文件输入（模板导入）由 webview 原生支持，无需处理。
 
-  // ---------- IndexedDB shim：目录句柄持久化为路径字符串 ----------
+  // ---------- localStorage -> 安装目录数据文件（已看缓存/字典/主题/目录记忆等全部持久化） ----------
+  // Rust 启动时把 data/localStorage.json 注入 window.__PATROL_DATA__，这里同步接管后防抖写回。
+  var __patrolStore = (window.__PATROL_DATA__ && typeof window.__PATROL_DATA__ === 'object')
+    ? window.__PATROL_DATA__ : {};
+  var __patrolTimer = null;
+  function persistStore() {
+    if (__patrolTimer) clearTimeout(__patrolTimer);
+    __patrolTimer = setTimeout(function () {
+      __patrolTimer = null;
+      try {
+        invoke('write_app_file', {
+          name: 'localStorage.json',
+          content: JSON.stringify(__patrolStore)
+        });
+      } catch (e) { }
+    }, 250);
+  }
+  function SimpleStorage() { }
+  SimpleStorage.prototype.getItem = function (k) {
+    k = String(k);
+    return Object.prototype.hasOwnProperty.call(__patrolStore, k) ? __patrolStore[k] : null;
+  };
+  SimpleStorage.prototype.setItem = function (k, v) {
+    __patrolStore[String(k)] = String(v);
+    persistStore();
+  };
+  SimpleStorage.prototype.removeItem = function (k) {
+    delete __patrolStore[String(k)];
+    persistStore();
+  };
+  SimpleStorage.prototype.clear = function () {
+    for (var k in __patrolStore) delete __patrolStore[k];
+    persistStore();
+  };
+  SimpleStorage.prototype.key = function (i) {
+    var keys = Object.keys(__patrolStore);
+    return i >= 0 && i < keys.length ? keys[i] : null;
+  };
+  Object.defineProperty(SimpleStorage.prototype, 'length', {
+    get: function () { return Object.keys(__patrolStore).length; }
+  });
+  window.localStorage = new SimpleStorage();
+
+  // ---------- IndexedDB shim：目录句柄持久化为路径字符串（底层走上面的 localStorage） ----------
   var STORE_KEY = '__pdefile_handle_db__';
   function loadDB() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); }
@@ -234,4 +311,16 @@
 
   // 标记 shim 就绪，便于排查加载顺序问题。
   window.__patrolShimReady = true;
+
+  // ---------- 界面修饰（仅外观，不动逻辑） ----------
+  // 1. 去掉顶部工具栏下方出现的横向滚动条；
+  // 2. 左下角设置齿轮按钮被渲染成黑块，固定为主题底色（浅色白底深字，深色反之）。
+  var style = document.createElement('style');
+  style.textContent =
+    'html, body { overflow-x: hidden !important; }' +
+    '#btnSettings { background: #FFFFFF !important; color: #1F2937 !important; border-color: #E5E7EB !important; }' +
+    'body.dark #btnSettings { background: #1F1F1F !important; color: #F5F5F5 !important; border-color: #3A3A3A !important; }';
+  document.addEventListener('DOMContentLoaded', function () {
+    document.head.appendChild(style);
+  });
 })();

@@ -147,11 +147,101 @@ fn is_dir(path: String) -> bool {
     Path::new(&path).is_dir()
 }
 
+
+// ---------- 安装目录数据持久化 ----------
+// 数据文件统一放在 <exe 目录>/data；目录不可写时回退到 %LOCALAPPDATA%\PatrolDefect\data。
+fn data_dir() -> Result<PathBuf, String> {
+    static DIR: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    if let Some(dir) = DIR.get() {
+        return dir.clone();
+    }
+    let resolved: Result<PathBuf, String> = (|| {
+        let exe_dir = std::env::current_exe()
+            .map_err(|e| e.to_string())?
+            .parent()
+            .ok_or_else(|| "无法确定程序目录".to_string())?
+            .to_path_buf();
+        let candidate = exe_dir.join("data");
+        std::fs::create_dir_all(&candidate).map_err(|e| e.to_string())?;
+        let probe = candidate.join(".writable");
+        std::fs::write(&probe, b"1").map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(&probe);
+        Ok(candidate)
+    })();
+    let fallback = || -> Result<PathBuf, String> {
+        let base = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        let candidate = PathBuf::from(base).join("PatrolDefect").join("data");
+        std::fs::create_dir_all(&candidate).map_err(|e| e.to_string())?;
+        Ok(candidate)
+    };
+    let dir = resolved.or_else(|_| fallback());
+    let _ = DIR.set(dir.clone());
+    dir
+}
+
+fn safe_name(name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+    {
+        return Err("非法的数据文件名".to_string());
+    }
+    Ok(name.to_string())
+}
+
+#[tauri::command]
+fn app_data_dir() -> Result<String, String> {
+    data_dir().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn read_app_file(name: String) -> Option<String> {
+    let name = safe_name(&name).ok()?;
+    let dir = data_dir().ok()?;
+    std::fs::read_to_string(dir.join(name)).ok()
+}
+
+#[tauri::command]
+fn write_app_file(name: String, content: String) -> Result<String, String> {
+    let name = safe_name(&name)?;
+    let dir = data_dir()?;
+    let target = dir.join(&name);
+    write_atomic(&target, content.as_bytes())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 fn main() {
+    let stored_state = data_dir()
+        .ok()
+        .and_then(|dir| std::fs::read_to_string(dir.join("localStorage.json")).ok())
+        .unwrap_or_default();
+    let init_state = if stored_state.trim().is_empty() {
+        "window.__PATROL_DATA__ = {};".to_string()
+    } else {
+        format!("window.__PATROL_DATA__ = {};", stored_state)
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|_app| Ok(()))
+        .setup(move |app| {
+            let win = tauri::webview::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("巡检缺陷命名分类工具")
+            .inner_size(1600.0, 950.0)
+            .min_inner_size(1100.0, 680.0)
+            .initialization_script(&init_state)
+            .build()?;
+            let _ = win.set_focus();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            app_data_dir,
+            read_app_file,
+            write_app_file,
             pick_folder,
             list_entries,
             read_file_base64,
@@ -193,6 +283,15 @@ fn main() {
                 .split_once("localhost/")
                 .map(|(_, rest)| rest.split(['?', '#']).next().unwrap_or(rest))
                 .unwrap_or("");
+            if request.method() == "OPTIONS" {
+                return tauri::http::Response::builder()
+                    .status(200)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Methods", "POST, OPTIONS")
+                    .header("Access-Control-Allow-Headers", "*")
+                    .body(b"".to_vec())
+                    .unwrap();
+            }
             let body = request.body().clone();
             match decode_path(encoded) {
                 Some(path) => match write_atomic(&path, &body) {

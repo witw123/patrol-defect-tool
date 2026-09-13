@@ -1,8 +1,0 @@
-[source.crates-io]
-replace-with = 'ustc-sparse'
-
-[source.ustc-sparse]
-registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
-
-[net]
-retry = 5

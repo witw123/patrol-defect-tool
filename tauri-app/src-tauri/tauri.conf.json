@@ -8,15 +8,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "巡检缺陷命名分类工具",
-        "width": 1600,
-        "height": 950,
-        "minWidth": 1100,
-        "minHeight": 680
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
