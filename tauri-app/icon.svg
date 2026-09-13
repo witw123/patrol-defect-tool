@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- 白底扁平：深色塔线 + 红色缺陷标注框 -->
+  <rect width="512" height="512" rx="116" fill="#FFFFFF"/>
+
+  <!-- 输电塔 -->
+  <g stroke="#1F1F1F" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M196 416 L252 122 M316 416 L260 122" stroke-width="22"/>
+    <path d="M252 122 L260 122" stroke-width="22"/>
+    <path d="M254 122 L258 74" stroke-width="18"/>
+    <!-- 横担 -->
+    <path d="M164 184 L348 184" stroke-width="20"/>
+    <path d="M188 252 L324 252" stroke-width="18"/>
+    <!-- 塔身横撑 -->
+    <path d="M222 344 L290 344" stroke-width="14"/>
+  </g>
+
+  <!-- 绝缘子 -->
+  <g stroke="#1F1F1F" stroke-width="12" stroke-linecap="round">
+    <path d="M176 184 L176 214"/>
+    <path d="M336 184 L336 214"/>
+    <path d="M199 252 L199 278"/>
+    <path d="M313 252 L313 278"/>
+    <path d="M256 74 L256 96"/>
+  </g>
+
+  <!-- 缺陷标注框：框住右侧悬垂绝缘子 -->
+  <rect x="296" y="196" width="88" height="108" fill="none" stroke="#E23B3B" stroke-width="18" stroke-linejoin="round"/>
+</svg>

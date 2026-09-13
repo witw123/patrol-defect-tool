@@ -1,0 +1,66 @@
+name: Build Tauri app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    defaults:
+      run:
+        working-directory: tauri-app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: tauri-app/src-tauri
+
+      - name: Install frontend deps
+        run: npm install
+
+      - name: Build Tauri app
+        run: npx tauri build
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item src-tauri/target/release/PatrolDefect.exe artifacts/PatrolDefect-win-x64.exe
+          Compress-Archive -Path src-tauri/target/release/PatrolDefect.exe -DestinationPath artifacts/PatrolDefect-win-x64.zip -Force
+          Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe artifacts/
+          Get-ChildItem artifacts
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PatrolDefect-tauri-win-x64
+          path: artifacts/*
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag `
+            --title "巡检缺陷命名分类工具 $tag（Tauri 版）" `
+            --generate-notes `
+            artifacts/*
