@@ -26,9 +26,8 @@ public sealed partial class MainWindow
         _rulesReady = true;
         _criticalTags = _rules.CriticalTags.ToHashSet(StringComparer.Ordinal);
         _candidatePool = TemplateService.FromCatalog(_rules, _criticalTags).CandidatePool!;
-        CategoryBox.ItemsSource = _rules.Categories.Keys.ToArray();
-        CategoryBox.SelectedIndex = 0;
         RenderSelectedTags();
+        RenderAvailableTags();
     }
 
     private async void ExportTemplate_Click(object sender, RoutedEventArgs e)
@@ -108,7 +107,6 @@ public sealed partial class MainWindow
 
     private void ApplyRules(RuleTemplate template)
     {
-        var selected = CategoryBox.SelectedItem as string;
         _rulesReady = false;
         _rules.Categories.Clear();
         foreach (var (category, tags) in template.Categories) _rules.Categories[category] = tags.ToArray();
@@ -116,13 +114,10 @@ public sealed partial class MainWindow
         foreach (var (source, targets) in template.Recommendations) _rules.Recommendations[source] = targets.ToArray();
         _criticalTags = (template.CriticalTags ?? []).ToHashSet(StringComparer.Ordinal);
         _candidatePool = template.CandidatePool?.ToArray() ?? [];
-        CategoryBox.ItemsSource = _rules.Categories.Keys.ToArray();
-        CategoryBox.SelectedItem = selected is not null && _rules.Categories.ContainsKey(selected) ? selected : _rules.Categories.Keys.FirstOrDefault();
         _rulesReady = true;
         RenderAvailableTags();
     }
 
-    private void CategoryBox_Changed(object sender, SelectionChangedEventArgs e) => RenderAvailableTags();
     private void TagSearch_Changed(object sender, TextChangedEventArgs e) => RenderAvailableTags();
     private void SectionText_Changed(object sender, TextChangedEventArgs e)
     {
@@ -148,37 +143,161 @@ public sealed partial class MainWindow
                 if (component.Contains(key) || key.Contains(component)) Add(values);
         }
         RecommendationText.Text = related.Count > 0 ? "关联：" + string.Join("、", related) : "";
-        if (_rules.Categories.ContainsKey(component)) CategoryBox.SelectedItem = component;
+        RenderAvailableTags();
         UpdateNamePreview();
     }
 
+    // 右侧分组标签面板（原版 renderSide）：【部件/分类】组 + 关联推荐组，
+    // 危急标签整行标红并带危急徽章，行内提供 危急切换 / 隐藏 快捷操作。
     private void RenderAvailableTags()
     {
         if (!_rulesReady) return;
+        TagGroupsPanel.Children.Clear();
         var search = TagSearch.Text.Trim();
-        IEnumerable<string> tags = search.Length > 0 ? _rules.Categories.Values.SelectMany(x => x) :
-            CategoryBox.SelectedItem is string category && _rules.Categories.TryGetValue(category, out var available) ? available : [];
-        AvailableTags.Items.Clear();
-        foreach (var tag in tags.Where(tag => !_hiddenTags.Contains(tag) &&
-            (search.Length == 0 || tag.Contains(search, StringComparison.OrdinalIgnoreCase))))
+        var component = ComponentText.Text.Trim();
+
+        var groups = new List<(string Title, IReadOnlyList<string> Tags)>();
+        if (search.Length > 0)
         {
-            var label = new TextBlock { Text = tag.TrimStart('_'), TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Center };
-            if (_criticalTags.Contains(tag))
-                label.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Firebrick);
-            var row = new Grid { Tag = tag };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(label);
-            var hide = new Button { Content = new FontIcon { Glyph = "" }, Padding = new Thickness(4),
-                Tag = tag, Background = null, BorderThickness = new Thickness(0) };
-            ToolTipService.SetToolTip(hide, "隐藏此标签（可用“恢复已隐藏”找回）");
-            Grid.SetColumn(hide, 1);
-            hide.Click += (_, _) => HideTag(tag);
-            row.Children.Add(hide);
-            AvailableTags.Items.Add(row);
+            var matches = _rules.Categories.Values.SelectMany(x => x)
+                .Where(tag => !_hiddenTags.Contains(tag) && tag.Contains(search, StringComparison.OrdinalIgnoreCase))
+                .Distinct().ToList();
+            if (matches.Count > 0) groups.Add(($@"搜索：{search}", matches));
         }
+        else
+        {
+            if (_rules.Categories.TryGetValue(component, out var own))
+                groups.Add((component, [.. own.Where(tag => !_hiddenTags.Contains(tag))]));
+            foreach (var (key, values) in _rules.Recommendations)
+            {
+                if (key == component) continue;
+                if (component.Length == 0 ||
+                    component.Contains(key, StringComparison.Ordinal) ||
+                    key.Contains(component, StringComparison.Ordinal))
+                {
+                    var tags = values.Where(tag => !_hiddenTags.Contains(tag)).ToList();
+                    if (tags.Count > 0) groups.Add((key, tags));
+                }
+            }
+            if (groups.Count == 0 && _rules.Categories.Keys.FirstOrDefault() is { } first)
+                groups.Add((first, [.. _rules.Categories[first].Where(tag => !_hiddenTags.Contains(tag))]));
+        }
+
+        foreach (var (title, tags) in groups)
+            TagGroupsPanel.Children.Add(BuildTagGroup(title, tags));
         RenderHiddenRestore();
+    }
+
+    private Border BuildTagGroup(string title, IReadOnlyList<string> tags)
+    {
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        header.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(6, 1, 6, 2),
+            Background = Solid(0xFFF39C12),
+            Child = new TextBlock
+            {
+                Text = $"【{title}】", FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = Solid(0xFFFFFFFF)
+            }
+        });
+        header.Children.Add(new TextBlock { Text = "关联推荐", FontSize = 11, Foreground = Solid(0xFFF39C12), VerticalAlignment = VerticalAlignment.Center });
+        header.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(6, 0, 6, 1),
+            Background = Solid(0xFFF39C12),
+            Child = new TextBlock { Text = tags.Count.ToString(), FontSize = 10, Foreground = Solid(0xFFFFFFFF) }
+        });
+        var panel = new StackPanel { Spacing = 2 };
+        panel.Children.Add(header);
+        foreach (var tag in tags) panel.Children.Add(BuildTagRow(tag));
+        return new Border
+        {
+            BorderBrush = Solid(0xFFF5B041),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(6, 4, 6, 6),
+            Child = panel
+        };
+    }
+
+    private Border BuildTagRow(string tag)
+    {
+        var critical = _criticalTags.Contains(tag);
+        var row = new Grid { ColumnSpacing = 6, Background = Solid(0x00FFFFFF) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(new TextBlock
+        {
+            Text = tag.TrimStart('_'),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 13,
+            Foreground = Solid(critical ? 0xFFC0392B : 0xFF1F2937)
+        });
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        if (critical)
+        {
+            actions.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(4, 0, 4, 1),
+                Background = Solid(0xFFC0392B),
+                Child = new TextBlock { Text = "危急", FontSize = 10, Foreground = Solid(0xFFFFFFFF) }
+            });
+        }
+        var criticalButton = new Button
+        {
+            Padding = new Thickness(3, 0, 3, 0), BorderThickness = new Thickness(0),
+            Background = Solid(0x00FFFFFF),
+            Content = new TextBlock { Text = critical ? "✓" : "⚠", FontSize = 11, Foreground = Solid(critical ? 0xFF2E7D32 : 0xFFE67E22) }
+        };
+        ToolTipService.SetToolTip(criticalButton, critical ? "取消危急属性" : "设为危急缺陷");
+        criticalButton.Click += (_, _) => ToggleCriticalFromSide(tag);
+        actions.Children.Add(criticalButton);
+        var hideButton = new Button
+        {
+            Padding = new Thickness(3, 0, 3, 0), BorderThickness = new Thickness(0),
+            Background = Solid(0x00FFFFFF),
+            Content = new FontIcon { Glyph = "\uE890", FontSize = 11 }
+        };
+        ToolTipService.SetToolTip(hideButton, "隐藏此标签");
+        hideButton.Click += (_, _) => HideTag(tag);
+        actions.Children.Add(hideButton);
+        Grid.SetColumn(actions, 1);
+        row.Children.Add(actions);
+
+        // 整行点击 = 应用该标签（与原版一致）。
+        row.PointerReleased += (_, args) =>
+        {
+            if (args.GetCurrentPoint(row).Properties.IsLeftButtonPressed)
+            {
+                AddTag(tag);
+                args.Handled = true;
+            }
+        };
+        return new Border { Child = row, Padding = new Thickness(4, 2, 2, 2), CornerRadius = new CornerRadius(3) };
+    }
+
+    // 侧栏危急切换（原版 toggleCriticalDefect）：立即生效并持久化到项目规则。
+    private void ToggleCriticalFromSide(string tag)
+    {
+        if (_saving || _opening) return;
+        if (!_criticalTags.Remove(tag)) _criticalTags.Add(tag);
+        try
+        {
+            _store?.SaveRuleSetting(TemplateService.Serialize(CurrentRules()));
+            RenderAvailableTags();
+            StatusText.Text = _criticalTags.Contains(tag)
+                ? $"已将【{tag.TrimStart('_')}】设为危急缺陷" : $"已取消【{tag.TrimStart('_')}】的危急缺陷属性";
+        }
+        catch (Exception error)
+        {
+            StatusText.Text = $"危急属性保存失败：{error.Message}";
+        }
     }
 
     // 原版 hideDefect：隐藏标签仅从候选列表移除，目录与危急属性保持不变。
@@ -201,11 +320,7 @@ public sealed partial class MainWindow
 
     private void SaveHiddenTags() => SaveSetting("hidden_tags", System.Text.Json.JsonSerializer.Serialize(_hiddenTags));
 
-    private void RenderHiddenRestore()
-    {
-        if (RestoreHiddenTagsButton is not null)
-            RestoreHiddenTagsButton.Visibility = _hiddenTags.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
+    private void RenderHiddenRestore() { }
 
     private void AvailableTags_Click(object sender, ItemClickEventArgs e)
     {

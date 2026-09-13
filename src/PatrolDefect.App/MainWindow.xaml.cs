@@ -154,8 +154,8 @@ public sealed partial class MainWindow : Window
         MarkCanvas.Children.Clear();
         _boxes.Clear();
         PreviewImage.Source = null;
-        FolderText.Text = _root;
-        OutputText.Text = string.IsNullOrEmpty(_outputRoot) ? "输出目录未设置" : _outputRoot;
+        InputFolderName.Text = System.IO.Path.GetFileName(_root);
+        OutputFolderName.Text = string.IsNullOrEmpty(_outputRoot) ? "未设置（点击连接）" : System.IO.Path.GetFileName(_outputRoot);
         RenderTree();
         AutoFitLeftWidth();
         StatusText.Text = $"已扫描 {_photos.Count} 张照片";
@@ -181,7 +181,8 @@ public sealed partial class MainWindow : Window
         if (folder is null) return false;
         _store!.SaveProject(_root!, folder.Path);
         _outputRoot = folder.Path;
-        OutputText.Text = _outputRoot;
+        OutputFolderName.Text = System.IO.Path.GetFileName(_outputRoot);
+        OutputFolderName.Text = System.IO.Path.GetFileName(folder.Path);
         SaveSession();
         RecordOperation("SetOutputDirectory", "", true, _outputRoot);
         return true;
@@ -226,25 +227,6 @@ public sealed partial class MainWindow : Window
         if (photo is null) return;
         if (!IsVisible(photo)) SetFilter("all");
         await LoadPhoto(photo);
-    }
-
-    private void SelectCurrentTreeNode()
-    {
-        foreach (var line in PhotoTree.RootNodes)
-        {
-            line.IsExpanded = false;
-            foreach (var tower in line.Children)
-            {
-                tower.IsExpanded = false;
-                foreach (var node in tower.Children)
-                {
-                    if (node.Content is not PhotoRecord photo || photo.Id != _currentPhoto?.Id) continue;
-                    line.IsExpanded = true;
-                    tower.IsExpanded = true;
-                    PhotoTree.SelectedNode = node;
-                }
-            }
-        }
     }
 
     private async void CancelMarked_Click(object sender, RoutedEventArgs e)
@@ -301,7 +283,7 @@ public sealed partial class MainWindow : Window
         _marked = _store.LoadMarkedPhotos();
         _critical = _store.LoadCriticalPhotoIds();
         RenderTree();
-        UpdateBaseToggle();
+        UpdateSummary();
     }
 
     private void WriteManifest()
@@ -585,7 +567,7 @@ public sealed partial class MainWindow : Window
             UpdateSummary();
             _store?.MarkViewed(photo.Id);
             _viewed.Add(photo.Id);
-            SelectCurrentTreeNode();
+            SelectCurrentTreeRow();
             StatusText.Text = $"{photo.RelativePath} · {bitmap.PixelWidth} × {bitmap.PixelHeight}";
             UpdateCounter();
             _cache.SetCurrentIndex(index);
@@ -595,7 +577,7 @@ public sealed partial class MainWindow : Window
                 .Select(candidate => candidate!.Value)
                 .ToList();
             _ = _cache.PreloadAsync(neighbors);
-            UpdateBaseToggle();
+            UpdateSummary();
         }
         catch (Exception error)
         {
@@ -608,16 +590,6 @@ public sealed partial class MainWindow : Window
         for (var i = 0; i < _photos.Count; i++)
             if (_photos[i].Id == photo.Id) return i;
         return -1;
-    }
-
-    private void UpdateBaseToggle()
-    {
-        if (_currentPhoto is null || _marked is null) return;
-        var hasBoxed = !string.IsNullOrEmpty(_boxedArtifactPath);
-        ToggleBaseButton.Visibility = hasBoxed ? Visibility.Visible : Visibility.Collapsed;
-        ToggleBaseButton.Content = _currentBaseIsBoxed ? "查看原图" : "查看圈示图";
-        MarkedStatusText.Text = _marked.Contains(_currentPhoto.Id)
-            ? $"已标记 ({(_currentBaseIsBoxed ? "圈示图" : "原图")})" : "未标记";
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)
@@ -653,7 +625,7 @@ public sealed partial class MainWindow : Window
         var output = await new OutputService().SaveAsync(_currentPhoto, marks, _outputRoot!,
             outputName: NamePreview.Text, tags: _selectedTags.ToArray());
         _store.RegisterArtifacts(_currentPhoto.Id, output.BoxedPath, output.OriginalPath);
-        if (CriticalCheck.IsChecked == true || _selectedTags.Any(tag => _criticalTags.Contains(tag)))
+        if (_selectedTags.Any(tag => _criticalTags.Contains(tag)))
         {
             var criticalDirectory = IoPath.Combine(_outputRoot!, "危急缺陷");
             Directory.CreateDirectory(criticalDirectory);
@@ -675,8 +647,8 @@ public sealed partial class MainWindow : Window
         RecordOperation("SaveArtifacts", _currentPhoto.RelativePath, true,
             output.BoxedPath + Environment.NewLine + output.OriginalPath);
         _boxedArtifactPath = output.BoxedPath;
-        SelectCurrentTreeNode();
-        UpdateBaseToggle();
+        SelectCurrentTreeRow();
+        UpdateSummary();
         var dialog = new ContentDialog
         {
             Title = "保存成功",

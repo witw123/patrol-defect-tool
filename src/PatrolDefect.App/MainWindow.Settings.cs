@@ -29,8 +29,8 @@ public sealed partial class MainWindow
         _settingsReady = false;
         try
         {
-            if (LoadSetting("theme") is { } theme)
-                RootGrid.RequestedTheme = theme == "dark" ? ElementTheme.Dark : ElementTheme.Light;
+            // 与原版一致默认浅色主题；设置中可切换深色。
+            RootGrid.RequestedTheme = LoadSetting("theme") == "dark" ? ElementTheme.Dark : ElementTheme.Light;
             if (LoadSetting("stroke") is { } stroke && double.TryParse(stroke, out var width))
                 StrokeSlider.Value = Math.Clamp(width, StrokeSlider.Minimum, StrokeSlider.Maximum);
             if (LoadSetting("left_width") is { } left && double.TryParse(left, out var leftWidth) && leftWidth >= 240)

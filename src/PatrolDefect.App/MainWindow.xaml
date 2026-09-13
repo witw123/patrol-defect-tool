@@ -4,82 +4,175 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:PatrolDefect.App"
     Title="巡检缺陷命名分类工具">
-    <Grid x:Name="RootGrid" Padding="16" RowSpacing="12" KeyDown="RootGrid_KeyDown">
+    <Grid x:Name="RootGrid" KeyDown="RootGrid_KeyDown">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <Grid ColumnSpacing="8">
+
+        <!-- 顶部工具栏：输入/输出目录 · 更多工具 · 红框粗细 · 翻图 · 计数 · 文件名 -->
+        <Grid Grid.Row="0" Padding="10,6" ColumnSpacing="10" Background="#F6F7F9" BorderBrush="#E5E7EB" BorderThickness="0,0,0,1">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Click="OpenFolder_Click">打开照片目录</Button>
-            <Button Click="PrevPhoto_Click" ToolTipService.ToolTip="上一张">上一张</Button>
-            <Button Click="NextPhoto_Click" ToolTipService.ToolTip="下一张">下一张</Button>
-            <Button Click="OutputFolder_Click" ToolTipService.ToolTip="选择成果输出目录">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <SymbolIcon Symbol="Folder"/>
-                    <TextBlock Text="输出目录"/>
-                </StackPanel>
-            </Button>
-            <Button Click="FilterAll_Click">全部</Button>
-            <Button Click="FilterMarked_Click">已标记</Button>
-            <Button Click="FilterUnmarked_Click">未标记</Button>
-            <Button Click="FilterUnviewed_Click">未看</Button>
-            <Button Click="BackToProgress_Click" ToolTipService.ToolTip="返回最后已看照片">
-                <SymbolIcon Symbol="BackToWindow"/>
-            </Button>
-            <Button Click="ResetViewed_Click">重置已看</Button>
-            <Button Click="ExportTemplate_Click" ToolTipService.ToolTip="导出分类与推荐模板">
-                <SymbolIcon Symbol="Save"/>
-            </Button>
-            <Button Click="ImportTemplate_Click" ToolTipService.ToolTip="导入分类与推荐模板">
-                <SymbolIcon Symbol="OpenFile"/>
-            </Button>
-            <Button Click="SyncOutput_Click">刷新输出</Button>
-            <Button Click="ClassifyOutput_Click">一键分类</Button>
-            <Button Click="CompleteOriginals_Click">补全原图</Button>
-            <Button Click="CleanOutputNames_Click">规范命名</Button>
-            <Button Click="Settings_Click">
-                <StackPanel Orientation="Horizontal" Spacing="4">
-                    <SymbolIcon Symbol="Setting"/>
-                    <TextBlock Text="设置"/>
-                </StackPanel>
-            </Button>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                <Button Click="OpenFolder_Click" Padding="8,4" Background="#EDF1F6" BorderThickness="0">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="输入目录:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="InputFolderName" Text="点击选择" Foreground="#C0392B" FontWeight="SemiBold" MaxWidth="160" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </Button>
+                <Button Click="OutputFolder_Click" Padding="8,4" Background="#EDF1F6" BorderThickness="0">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="输出目录:" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="OutputFolderName" Text="未设置（点击连接）" Foreground="#C0392B" FontWeight="SemiBold" MaxWidth="200" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </Button>
+                <Button Padding="8,4" Background="#EDF1F6" BorderThickness="0">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="更多工具" FontWeight="SemiBold"/>
+                        <FontIcon Glyph="&#xE70D;" FontSize="10"/>
+                    </StackPanel>
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="分类与推荐规则" Click="EditRules_Click"/>
+                            <MenuFlyoutItem Text="导出模板" Click="ExportTemplate_Click"/>
+                            <MenuFlyoutItem Text="导入模板" Click="ImportTemplate_Click"/>
+                            <MenuFlyoutSeparator/>
+                            <MenuFlyoutItem Text="刷新输出" Click="SyncOutput_Click"/>
+                            <MenuFlyoutItem Text="一键分类" Click="ClassifyOutput_Click"/>
+                            <MenuFlyoutItem Text="补全原图" Click="CompleteOriginals_Click"/>
+                            <MenuFlyoutItem Text="规范命名" Click="CleanOutputNames_Click"/>
+                            <MenuFlyoutSeparator/>
+                            <MenuFlyoutItem Text="重置已看记录" Click="ResetViewed_Click"/>
+                            <MenuFlyoutItem Text="恢复已隐藏标签" Click="RestoreHidden_Click"/>
+                            <MenuFlyoutSeparator/>
+                            <MenuFlyoutItem Text="设置" Click="Settings_Click"/>
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
             </StackPanel>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock x:Name="FolderText" TextTrimming="CharacterEllipsis" Text="尚未打开项目"/>
-                <TextBlock x:Name="OutputText" TextTrimming="CharacterEllipsis" Text="输出目录未设置"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <TextBlock Text="红框粗细:" VerticalAlignment="Center"/>
+                <Slider x:Name="StrokeSlider" Width="110" Minimum="2" Maximum="30" Value="10"
+                        StepFrequency="1" ValueChanged="StrokeSlider_Changed" VerticalAlignment="Center"/>
+                <TextBlock x:Name="StrokeValueText" Text="10px" VerticalAlignment="Center" FontWeight="SemiBold" MinWidth="34"/>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button Click="PrevPhoto_Click" Padding="8,2" Background="#EDF1F6" BorderThickness="0" Content="◀"/>
+                <Button Click="NextPhoto_Click" Padding="8,2" Background="#EDF1F6" BorderThickness="0" Content="▶"/>
+                <TextBlock x:Name="CounterText" Text="— / —" VerticalAlignment="Center" FontWeight="SemiBold" Margin="6,0,0,0"/>
+                <TextBlock x:Name="GroupTagText" Text="" VerticalAlignment="Center" Foreground="#C0392B" FontWeight="SemiBold"/>
+                <TextBlock x:Name="FileNameText" Text="" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           Foreground="#6B7280" MaxWidth="900"/>
             </StackPanel>
         </Grid>
-        <Grid Grid.Row="1" ColumnSpacing="0">
+
+        <!-- 三栏主区 -->
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="LeftColumn" Width="280"/>
+                <ColumnDefinition x:Name="LeftColumn" Width="320" MinWidth="240"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition x:Name="RightColumn" Width="280"/>
+                <ColumnDefinition x:Name="RightColumn" Width="310" MinWidth="220"/>
             </Grid.ColumnDefinitions>
-            <Grid Grid.Column="0">
+
+            <!-- 左侧：统计 + 筛选 + 目录树 + 信息卡 -->
+            <Grid Grid.Column="0" Padding="8,6" RowSpacing="4">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,0,4">
-                    <TextBlock x:Name="TreeSummaryText" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center"/>
+                <Grid Grid.Row="0" ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="TreeSummaryText" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center" Foreground="#374151"/>
+                    <Button Grid.Column="1" Content="刷新输出" Click="SyncOutput_Click" Padding="6,2" FontSize="12"/>
+                </Grid>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="4">
+                    <Button x:Name="FilterAllButton" Click="FilterAll_Click" Padding="6,2" FontSize="12">全部</Button>
+                    <Button x:Name="FilterMarkedButton" Click="FilterMarked_Click" Padding="6,2" FontSize="12">已标记</Button>
+                    <Button x:Name="FilterUnmarkedButton" Click="FilterUnmarked_Click" Padding="6,2" FontSize="12">未标记</Button>
+                    <Button x:Name="FilterUnviewedButton" Click="FilterUnviewed_Click" Padding="6,2" FontSize="12">未看</Button>
+                </StackPanel>
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="4">
                     <Button Content="展开" Click="ExpandAll_Click" Padding="6,2" FontSize="12"/>
                     <Button Content="折叠" Click="CollapseAll_Click" Padding="6,2" FontSize="12"/>
                     <Button Content="自适应" Click="AutoFitWidth_Click" Padding="6,2" FontSize="12"
                             ToolTipService.ToolTip="根据名称长度自动适配左栏宽度"/>
                 </StackPanel>
-                <TreeView x:Name="PhotoTree" Grid.Row="1" ItemInvoked="PhotoTree_ItemInvoked"/>
+
+                <!-- 目录树 + 浮动“最后一个已看” -->
+                <Grid Grid.Row="3">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto">
+                        <StackPanel x:Name="TreePanel" Spacing="1" Padding="0,2"/>
+                    </ScrollViewer>
+                    <Button Click="BackToProgress_Click" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                            Margin="8,0,0,8" Padding="8,3" FontSize="12" CornerRadius="12" BorderThickness="0"
+                            Background="#111827" Foreground="White">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <FontIcon Glyph="&#xE7B3;" FontSize="11"/>
+                            <TextBlock Text="最后一个已看"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!-- 底部信息卡 -->
+                <Border Grid.Row="4" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="8,6,4,2">
+                    <Grid RowSpacing="2" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="当前线路" Foreground="#9CA3AF" FontSize="12"/>
+                        <TextBlock Grid.Column="1" x:Name="CardLine" Text="—" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Row="1" Text="所属杆塔" Foreground="#9CA3AF" FontSize="12"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="CardTower" Text="—" FontSize="12"/>
+                        <TextBlock Grid.Row="2" Text="部件位置" Foreground="#9CA3AF" FontSize="12"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="CardLocation" Text="—" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Row="3" Text="标记状态" Foreground="#9CA3AF" FontSize="12"/>
+                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="MarkedStatusText" Text="未标记" FontSize="12"/>
+                        <StackPanel Grid.Row="3" Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                            <Button x:Name="ToggleBaseButton" Content="查看原图" Click="ToggleBase_Click"
+                                    Padding="4,0" FontSize="11" Visibility="Collapsed" Background="#EEF2F7" BorderThickness="0"/>
+                            <Button x:Name="CancelMarkedButton" Content="取消已标" Click="CancelMarked_Click"
+                                    Padding="4,0" FontSize="11" Visibility="Collapsed" Background="#FDECEC" Foreground="#C0392B" BorderThickness="0"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="4" Text="已看状态" Foreground="#9CA3AF" FontSize="12"/>
+                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="CardViewed" Text="未看" FontSize="12"/>
+                        <TextBlock Grid.Row="5" Text="缺陷" Foreground="#9CA3AF" FontSize="12"/>
+                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="CardDefect" Text="未保存" FontSize="12"/>
+                        <Button Grid.Row="5" Grid.Column="2" x:Name="CancelCriticalButton" Content="撤回危急" Click="CancelCritical_Click"
+                                Padding="4,0" FontSize="11" Visibility="Collapsed" Background="#FDECEC" Foreground="#C0392B" BorderThickness="0"/>
+                    </Grid>
+                </Border>
             </Grid>
+
             <local:CanvasSurface x:Name="LeftResizer" Grid.Column="1" Width="6" Background="Transparent"/>
-            <Border Grid.Column="2" BorderBrush="Gray" BorderThickness="1">
-                    <local:CanvasSurface x:Name="CanvasHost" Background="#202124"
+
+            <!-- 中间画布 + 底部操作条 -->
+            <Border Grid.Column="2" Background="#111318">
+                <Grid>
+                    <local:CanvasSurface x:Name="CanvasHost" Background="#111318"
                           PointerPressed="CanvasHost_PointerPressed"
                           PointerMoved="CanvasHost_PointerMoved"
                           PointerReleased="CanvasHost_PointerReleased"
@@ -92,58 +185,60 @@
                             <Canvas x:Name="MarkCanvas"/>
                         </Canvas>
                     </local:CanvasSurface>
-            </Border>
-            <local:CanvasSurface x:Name="RightResizer" Grid.Column="3" Width="6" Background="Transparent"/>
-            <ScrollViewer Grid.Column="4" HorizontalScrollBarVisibility="Disabled" Margin="8,0,0,0">
-            <StackPanel Spacing="8">
-                <TextBlock Text="缺陷信息" FontSize="18"/>
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <TextBlock x:Name="MarkedStatusText" Text="未标记" VerticalAlignment="Center" FontWeight="SemiBold"/>
-                    <Button x:Name="ToggleBaseButton" Click="ToggleBase_Click" Visibility="Collapsed"
-                            Padding="6,2" FontSize="12">
-                        <ToolTipService.ToolTip>切换缺陷圈示图与纯净原图</ToolTipService.ToolTip>
-                        查看原图
-                    </Button>
-                </StackPanel>
-                <Button Click="EditRules_Click" Content="分类与推荐规则"/>
-                <TextBox x:Name="ComponentText" Header="部件" TextChanged="ComponentText_Changed"/>
-                <TextBlock x:Name="RecommendationText" TextWrapping="Wrap" FontSize="12"/>
-                <ComboBox x:Name="CategoryBox" Header="缺陷分类" HorizontalAlignment="Stretch"
-                          SelectionChanged="CategoryBox_Changed"/>
-                <TextBox x:Name="TagSearch" PlaceholderText="搜索缺陷标签" TextChanged="TagSearch_Changed"/>
-                <Button x:Name="RestoreHiddenTagsButton" Click="RestoreHidden_Click" Visibility="Collapsed"
-                        Padding="6,2" FontSize="12">
-                    <ToolTipService.ToolTip>恢复显示全部被隐藏的缺陷标签</ToolTipService.ToolTip>
-                    恢复已隐藏
-                </Button>
-                <ListView x:Name="AvailableTags" MaxHeight="220" SelectionMode="None"
-                          IsItemClickEnabled="True" ItemClick="AvailableTags_Click"/>
-                <TextBlock Text="已选标签" FontWeight="SemiBold"/>
-                <StackPanel x:Name="SelectedTagsPanel" Spacing="4"/>
-                <Grid ColumnSpacing="4">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                    <TextBox x:Name="DefectText" PlaceholderText="自定义缺陷标签"/>
-                    <Button Grid.Column="1" Click="AddCustomTag_Click" ToolTipService.ToolTip="添加标签"><SymbolIcon Symbol="Add"/></Button>
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Bottom" HorizontalAlignment="Center" Spacing="8" Margin="0,0,0,12">
+                        <Border HorizontalAlignment="Center" CornerRadius="4" Background="#E5E7EB" Padding="10,3">
+                            <TextBlock x:Name="FileNameChip" Text="" FontSize="13" Foreground="#374151"/>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                            <Button Click="SaveCriticalOnly_Click" Padding="16,7" CornerRadius="4" BorderThickness="0"
+                                    Background="#E67E22" Foreground="White">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE7BA;" FontSize="14"/>
+                                    <TextBlock Text="危急缺陷" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="ClearSecondary_Click" Padding="16,7" CornerRadius="4" BorderThickness="0"
+                                    Background="#2D3436" Foreground="White">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE70F;" FontSize="14"/>
+                                    <TextBlock Text="清除并二次编辑"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="Save_Click" Padding="18,7" CornerRadius="4" BorderThickness="0"
+                                    Background="#C0392B" Foreground="White">
+                                <TextBlock Text="保存缺陷图片" FontWeight="Bold"/>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
                 </Grid>
-                <TextBox x:Name="SectionText" Header="裸导线区段" TextChanged="SectionText_Changed"/>
-                <Slider x:Name="StrokeSlider" Header="红框线宽" Minimum="2" Maximum="30" Value="10"
-                        StepFrequency="1" ValueChanged="StrokeSlider_Changed"/>
-                <ComboBox x:Name="ConclusionBox" Header="检查结论"/>
-                <TextBlock x:Name="NamePreview" TextWrapping="Wrap" FontSize="12"/>
-                <Button Click="ClearSecondary_Click">清除并二次编辑</Button>
-                <CheckBox x:Name="CriticalCheck" Content="同时保存到危急缺陷"/>
-                <Button Click="Save_Click">保存当前标注</Button>
-                <Button Click="SaveCriticalOnly_Click"
-                        ToolTipService.ToolTip="独立保存危急缺陷：仅将当前圈示图保存到「危急缺陷」文件夹，与保存当前标注互不影响">
-                    仅保存危急缺陷
-                </Button>
-                <Button Click="CancelMarked_Click">取消当前成果</Button>
-                <Button Click="CancelCritical_Click">撤回危急成果</Button>
-            </StackPanel>
+            </Border>
+
+            <local:CanvasSurface x:Name="RightResizer" Grid.Column="3" Width="6" Background="Transparent"/>
+
+            <!-- 右侧：缺陷信息面板 -->
+            <ScrollViewer Grid.Column="4" Padding="10,8" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="缺陷信息" FontSize="16" FontWeight="Bold"/>
+                    <TextBox x:Name="ComponentText" Header="目标部件" TextChanged="ComponentText_Changed"/>
+                    <TextBlock x:Name="RecommendationText" TextWrapping="Wrap" FontSize="11" Foreground="#C0392B"/>
+                    <TextBlock Text="已选标签" FontWeight="SemiBold" FontSize="13"/>
+                    <StackPanel x:Name="SelectedTagsPanel" Spacing="4"/>
+                    <Grid ColumnSpacing="4">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="DefectText" PlaceholderText="自定义缺陷标签"/>
+                        <Button Grid.Column="1" Click="AddCustomTag_Click" ToolTipService.ToolTip="添加标签"><SymbolIcon Symbol="Add"/></Button>
+                    </Grid>
+                    <TextBox x:Name="TagSearch" PlaceholderText="搜索缺陷标签" TextChanged="TagSearch_Changed"/>
+                    <StackPanel x:Name="TagGroupsPanel" Spacing="6"/>
+                    <TextBox x:Name="SectionText" Header="裸导线区段" TextChanged="SectionText_Changed"/>
+                    <ComboBox x:Name="ConclusionBox" Header="检查结论" HorizontalAlignment="Stretch"/>
+                    <TextBlock x:Name="NamePreview" TextWrapping="Wrap" FontSize="11" Foreground="#6B7280"/>
+                </StackPanel>
             </ScrollViewer>
         </Grid>
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="16">
-            <TextBlock x:Name="CounterText" Text="— / —"/>
+
+        <!-- 状态栏 -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="16" Padding="10,3">
             <TextBlock x:Name="StatusText" Text="就绪"/>
         </StackPanel>
     </Grid>
