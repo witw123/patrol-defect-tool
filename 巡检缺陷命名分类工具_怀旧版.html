@@ -722,8 +722,17 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    will-change: transform;
+    transform: translateZ(0);
   }
-  #stage canvas { position: absolute; inset: 0; display: block; }
+  #stage canvas {
+    position: absolute;
+    inset: 0;
+    display: block;
+    will-change: contents;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
   #overlayCanvas { cursor: crosshair; touch-action: none; }
 
   /* 紧凑收敛固定在图片工作区正下方的操作栏（上方为预览，下方为保存按钮，自适应铺满不遮挡上方图片与红框） */
@@ -1108,6 +1117,25 @@
   }
   .def-item:active { cursor: grabbing; }
   .def-item:hover { background: var(--hover); }
+  .drag-ghost-badge {
+    position: fixed;
+    z-index: 99999;
+    pointer-events: none;
+    background: var(--surface, #1e1e1e);
+    color: var(--text, #ffffff);
+    border: 1px solid var(--accent, #c62828);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    opacity: 0.95;
+    transform: translate3d(0, 0, 0);
+  }
+  .def-item { touch-action: none; }
+  .pos-header { cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
+  .pos-header:active { cursor: grabbing; }
   .def-item.is-dragging {
     opacity: 0.35;
     background: var(--hover);
@@ -1689,6 +1717,18 @@
   <button id="btnSettings" type="button" title="设置"><svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   <div id="settingsPanel">
     <div class="row"><span>黑夜模式</span><button id="themeSwitch" class="switch" type="button"></button></div>
+    <div class="row">
+      <span>界面缩放</span>
+      <div style="display:flex;align-items:center;gap:4px">
+        <button id="btnZoomOut" class="btn" type="button" style="width:24px;height:24px;padding:0;font-size:13px;line-height:22px" title="缩小 5%">-</button>
+        <div style="display:flex;align-items:center;border:1px solid var(--panel-border);border-radius:3px;padding:0 2px;background:var(--bg)">
+          <input id="zoomInput" type="number" min="50" max="200" step="5" style="width:38px;height:22px;border:none;outline:none;background:transparent;text-align:right;font-size:11.5px;color:inherit;font-family:inherit" value="100" title="可直接输入缩放百分比 (50-200)" />
+          <span style="font-size:11px;color:var(--muted);padding-left:1px">%</span>
+        </div>
+        <button id="btnZoomIn" class="btn" type="button" style="width:24px;height:24px;padding:0;font-size:13px;line-height:22px" title="放大 5%">+</button>
+        <button id="btnZoomReset" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px" title="重置为 100%">重置</button>
+      </div>
+    </div>
     <div class="row"><button id="btnOpenRecSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px;color:var(--accent);font-weight:600">修改推荐与分类规则</button></div>
     <div class="row"><button id="btnExportTemplateSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">导出标签与推荐模板</button></div>
     <div class="row"><button id="btnImportTemplateSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">导入外部模板文件</button></div>
@@ -3490,6 +3530,8 @@
     baseCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     baseCtx.clearRect(0, 0, v.w, v.h);
     if (img) {
+      baseCtx.imageSmoothingEnabled = true;
+      baseCtx.imageSmoothingQuality = 'medium';
       setViewTransform(baseCtx);
       baseCtx.drawImage(img, 0, 0, v.w, v.h);
       currentRenderedImg = img;
@@ -3951,13 +3993,14 @@
     }
   }
 
-  function manifestSet(outRelPath, origName, relPath) {
+  function manifestSet(outRelPath, origName, relPath, line) {
     if (!outRelPath || !origName) return;
     if (!outputManifest) outputManifest = { dirName: output.mainHandle ? output.mainHandle.name : '', entries: {} };
     var storedRel = relPath || origName;
+    var lineName = line || (typeof window !== 'undefined' && window.__ACTIVE_LINE__) || '';
     var existed = outputManifest.entries[outRelPath];
-    if (existed && existed.origName === origName && existed.relPath === storedRel) return;
-    outputManifest.entries[outRelPath] = { origName: origName, relPath: storedRel };
+    if (existed && existed.origName === origName && existed.relPath === storedRel && (!lineName || existed.line === lineName)) return;
+    outputManifest.entries[outRelPath] = { origName: origName, relPath: storedRel, line: lineName || (existed && existed.line) || '' };
     scheduleSaveOutputManifest();
   }
 
@@ -4621,8 +4664,40 @@
     var origExt = origName.slice(origName.lastIndexOf('.')).toLowerCase();
     var origBase = origName.slice(0, origName.lastIndexOf('.'));
     var origInfo = parseFilePrefixAndLocation(origName, relPath || '');
+    var targetKey = relPath || origName;
+    var isMarked = !!(state.markedFiles && (state.markedFiles.has(targetKey) || state.markedFiles.has(origName)));
     var deletedCount = 0;
     await ensureOutputManifest();
+
+    // 性能优化：优先通过输出清单反查已知关联文件精准删除，未标文件 0ms 瞬间跳过
+    var knownRelPaths = [];
+    if (outputManifest && outputManifest.entries) {
+      for (var outRelKey in outputManifest.entries) {
+        var mEnt = outputManifest.entries[outRelKey];
+        if (mEnt && (mEnt.relPath === targetKey || mEnt.origName === origName)) {
+          knownRelPaths.push(outRelKey);
+        }
+      }
+    }
+    if (!isMarked && knownRelPaths.length === 0) {
+      return 0;
+    }
+    if (knownRelPaths.length > 0) {
+      for (var ki = 0; ki < knownRelPaths.length; ki++) {
+        var outRel = knownRelPaths[ki];
+        try {
+          var parts = outRel.split('/');
+          var currH = output.mainHandle;
+          for (var pi = 0; pi < parts.length - 1; pi++) {
+            currH = await currH.getDirectoryHandle(parts[pi], { create: false });
+          }
+          await currH.removeEntry(parts[parts.length - 1]);
+          deletedCount++;
+        } catch (e) { }
+        manifestDelete(outRel);
+      }
+      return deletedCount;
+    }
 
     async function cleanInDirectory(dh, depth, prefixPath, dirName) {
       if (depth > 4) return;
@@ -7128,7 +7203,7 @@
   // 保持右侧标签绝对简洁清爽，无占位拖拽手柄，支持直接按住拖拽排序与移动，使用极简高清晰矢量图标
   function renderCategoryGroup(catName, items, extraClass, badgeHtml) {
     var h = '<div class="pos-group ' + (extraClass || '') + '" data-category="' + esc(catName) + '">';
-    h += '  <div class="pos-header" draggable="true" data-category="' + esc(catName) + '" title="按住可上下拖动调整分类位置">';
+    h += '  <div class="pos-header" data-category="' + esc(catName) + '" title="按住可上下拖动调整分类位置">';
     h += '    <span class="pos-title-text" title="分类：' + esc(catName) + '">【' + esc(catName) + '】 ' + (badgeHtml || '') + '</span>';
     h += '    <span class="pos-count" title="该分类下标签数量">' + (items ? items.length : 0) + '</span>';
     h += '    <div class="pos-actions">';
@@ -7158,7 +7233,7 @@
     var critBadge = isCrit ? '<span class="critical-indicator" title="用户已将此缺陷设为危急缺陷，保存时会额外输出至「危急缺陷」目录" style="display:inline-flex;align-items:center;justify-content:center;background:rgba(239,68,68,0.14);color:#dc2626;font-size:10px;font-weight:700;padding:1px 4px;border-radius:3px;margin-right:4px;border:1px solid rgba(239,68,68,0.35);flex-shrink:0">危急</span>' : '';
     var textStyle = isCrit ? 'color:#dc2626;font-weight:600' : '';
     var criticalBtn = '<button class="action-icon-btn critical-toggle-btn ' + (isCrit ? 'active' : '') + '" title="' + (isCrit ? '取消【' + esc(t) + '】的危急缺陷属性' : '将【' + esc(t) + '】设为危急缺陷') + '" data-category="' + esc(cat) + '" data-text="' + esc(t) + '" aria-label="' + (isCrit ? '取消危急缺陷' : '设为危急缺陷') + '">' + (isCrit ? '✓' : '⚠') + '</button>';
-    return '<div class="def-item ' + (isCrit ? 'is-critical-item' : '') + '" draggable="true" data-category="' + esc(cat) + '" data-text="' + esc(t) + '" title="' + (isCrit ? '【危急缺陷】' : '') + '点击应用此标签；按住可拖动排序或移动">' +
+    return '<div class="def-item ' + (isCrit ? 'is-critical-item' : '') + '" data-category="' + esc(cat) + '" data-text="' + esc(t) + '" title="' + (isCrit ? '【危急缺陷】' : '') + '点击应用此标签；按住可拖动排序或移动">' +
       critBadge +
       '<span class="t" style="' + textStyle + '">' + esc(t) + '</span>' +
       '<div class="item-actions">' +
@@ -8066,107 +8141,190 @@
     }
   }
 
-  var draggedItem = null;
+  /* ================= 纯指针无感高精度拖拽排序与移动（绝无禁止图标，100% 可靠） ================= */
+
+  var ptrDrag = null;
+  var ptrGhost = null;
   var lastDragEndTime = 0;
 
+  // 100% 阻止浏览器原生拖拽与文本拖选，彻底杜绝出现 🚫 禁止图标
   sideScroll.addEventListener('dragstart', function (e) {
-    if (e.target.closest('.action-icon-btn') || e.target.closest('input')) {
+    e.preventDefault();
+    return false;
+  });
+  sideScroll.addEventListener('selectstart', function (e) {
+    if (!e.target.closest('input, textarea')) {
       e.preventDefault();
-      return;
+      return false;
     }
+  });
+
+  function cleanupDragVisuals() {
+    document.body.style.cursor = '';
+    if (ptrGhost && ptrGhost.parentNode) {
+      ptrGhost.parentNode.removeChild(ptrGhost);
+    }
+    ptrGhost = null;
+    document.querySelectorAll('.is-dragging, .drag-over-top, .drag-over-bottom, .drag-over-body').forEach(function (el) {
+      el.classList.remove('is-dragging', 'drag-over-top', 'drag-over-bottom', 'drag-over-body');
+    });
+  }
+
+  sideScroll.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0) return; // 仅响应鼠标主键
+    if (e.target.closest('.action-icon-btn, input, button')) return;
 
     var defItem = e.target.closest('.def-item');
-    if (defItem) {
-      var dCat = defItem.dataset.category;
-      var dTag = defItem.dataset.text;
-      draggedItem = { type: 'tag', tag: dTag, cat: dCat, el: defItem };
-      defItem.classList.add('is-dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', dTag);
-      return;
-    }
-
     var posHeader = e.target.closest('.pos-header');
-    if (posHeader) {
-      var cCat = posHeader.dataset.category;
-      var pGroup = posHeader.closest('.pos-group');
-      draggedItem = { type: 'category', cat: cCat, el: pGroup };
-      if (pGroup) pGroup.classList.add('is-dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', cCat);
-      return;
-    }
-  });
+    if (!defItem && !posHeader) return;
 
-  sideScroll.addEventListener('dragend', function () {
-    lastDragEndTime = Date.now();
-    draggedItem = null;
-    document.querySelectorAll('.is-dragging, .drag-over-top, .drag-over-bottom, .drag-over-body').forEach(function (el) {
-      el.classList.remove('is-dragging', 'drag-over-top', 'drag-over-bottom', 'drag-over-body');
-    });
-  });
+    var dragEl = defItem || (posHeader ? posHeader.closest('.pos-group') : null);
+    if (!dragEl) return;
 
-  sideScroll.addEventListener('dragover', function (e) {
-    if (!draggedItem) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-
-    document.querySelectorAll('.drag-over-top, .drag-over-bottom, .drag-over-body').forEach(function (el) {
-      el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-body');
-    });
-
-    if (draggedItem.type === 'category') {
-      var targetGroup = e.target.closest('.pos-group');
-      if (targetGroup && targetGroup !== draggedItem.el) {
-        var rect = targetGroup.getBoundingClientRect();
-        var isTop = (e.clientY - rect.top) < (rect.height / 2);
-        targetGroup.classList.add(isTop ? 'drag-over-top' : 'drag-over-bottom');
-      }
-    } else if (draggedItem.type === 'tag') {
-      var targetItem = e.target.closest('.def-item');
-      var targetBody = e.target.closest('.pos-body');
-      if (targetItem && targetItem !== draggedItem.el) {
-        var rect2 = targetItem.getBoundingClientRect();
-        var isTop2 = (e.clientY - rect2.top) < (rect2.height / 2);
-        targetItem.classList.add(isTop2 ? 'drag-over-top' : 'drag-over-bottom');
-      } else if (targetBody) {
-        targetBody.classList.add('drag-over-body');
-      }
-    }
-  });
-
-  sideScroll.addEventListener('drop', function (e) {
-    if (!draggedItem) return;
+    // 阻止浏览器默认的原生选择与拖放意图，彻底根除 🚫 禁止光标
     e.preventDefault();
 
-    if (draggedItem.type === 'category') {
-      var targetGroup = e.target.closest('.pos-group');
-      if (targetGroup && targetGroup !== draggedItem.el) {
-        var targetCat = targetGroup.dataset.category;
-        var rect = targetGroup.getBoundingClientRect();
-        var isTop = (e.clientY - rect.top) < (rect.height / 2);
-        reorderCategory(draggedItem.cat, targetCat, isTop);
-      }
-    } else if (draggedItem.type === 'tag') {
-      var targetItem = e.target.closest('.def-item');
-      var targetBody = e.target.closest('.pos-body');
-      if (targetItem && targetItem !== draggedItem.el) {
-        var toCat = targetItem.dataset.category;
-        var targetTag = targetItem.dataset.text;
-        var rect2 = targetItem.getBoundingClientRect();
-        var isTop2 = (e.clientY - rect2.top) < (rect2.height / 2);
-        moveOrReorderTag(draggedItem.cat, draggedItem.tag, toCat, targetTag, isTop2);
-      } else if (targetBody) {
-        var toCat2 = targetBody.dataset.category;
-        moveOrReorderTag(draggedItem.cat, draggedItem.tag, toCat2, null, false);
+    ptrDrag = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      isDragging: false,
+      type: defItem ? 'tag' : 'category',
+      tag: defItem ? defItem.dataset.text : null,
+      cat: defItem ? defItem.dataset.category : (posHeader ? posHeader.dataset.category : null),
+      el: dragEl,
+      dropTarget: null
+    };
+  });
+
+  window.addEventListener('pointermove', function (e) {
+    if (!ptrDrag) return;
+
+    if (!ptrDrag.isDragging) {
+      var dx = Math.abs(e.clientX - ptrDrag.startX);
+      var dy = Math.abs(e.clientY - ptrDrag.startY);
+      if (dx > 4 || dy > 4) {
+        ptrDrag.isDragging = true;
+        document.body.style.cursor = 'grabbing';
+
+        try {
+          if (ptrDrag.el && ptrDrag.el.setPointerCapture) {
+            ptrDrag.el.setPointerCapture(ptrDrag.pointerId);
+          }
+        } catch (err) {}
+        ptrDrag.el.classList.add('is-dragging');
+
+        ptrGhost = document.createElement('div');
+        ptrGhost.className = 'drag-ghost-badge';
+        ptrGhost.textContent = (ptrDrag.type === 'tag' ? '🏷️ ' + ptrDrag.tag : '📁 【' + ptrDrag.cat + '】');
+        document.body.appendChild(ptrGhost);
       }
     }
 
-    draggedItem = null;
-    document.querySelectorAll('.is-dragging, .drag-over-top, .drag-over-bottom, .drag-over-body').forEach(function (el) {
-      el.classList.remove('is-dragging', 'drag-over-top', 'drag-over-bottom', 'drag-over-body');
-    });
-  });
+    if (ptrDrag.isDragging) {
+      e.preventDefault();
+      if (ptrGhost) {
+        ptrGhost.style.left = (e.clientX + 14) + 'px';
+        ptrGhost.style.top = (e.clientY + 14) + 'px';
+      }
+
+      // 清理前一帧的高亮指示器
+      document.querySelectorAll('.drag-over-top, .drag-over-bottom, .drag-over-body').forEach(function (el) {
+        el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-body');
+      });
+      ptrDrag.dropTarget = null;
+
+      // 准确定位光标下方真实元素
+      var under = document.elementFromPoint(e.clientX, e.clientY);
+      if (!under) return;
+
+      if (ptrDrag.type === 'category') {
+        var targetGroup = under.closest('.pos-group');
+        if (targetGroup && targetGroup !== ptrDrag.el) {
+          var rect = targetGroup.getBoundingClientRect();
+          var isTop = (e.clientY - rect.top) < (rect.height / 2);
+          targetGroup.classList.add(isTop ? 'drag-over-top' : 'drag-over-bottom');
+          ptrDrag.dropTarget = {
+            type: 'category',
+            targetCat: targetGroup.dataset.category,
+            isTop: isTop
+          };
+        }
+      } else if (ptrDrag.type === 'tag') {
+        var targetItem = under.closest('.def-item');
+        var targetBody = under.closest('.pos-body');
+        var targetGroup2 = under.closest('.pos-group');
+
+        if (targetItem && targetItem !== ptrDrag.el) {
+          var rect2 = targetItem.getBoundingClientRect();
+          var isTop2 = (e.clientY - rect2.top) < (rect2.height / 2);
+          targetItem.classList.add(isTop2 ? 'drag-over-top' : 'drag-over-bottom');
+          ptrDrag.dropTarget = {
+            type: 'tag_to_tag',
+            toCat: targetItem.dataset.category,
+            targetTag: targetItem.dataset.text,
+            isTop: isTop2
+          };
+        } else if (targetBody) {
+          targetBody.classList.add('drag-over-body');
+          ptrDrag.dropTarget = {
+            type: 'tag_to_cat',
+            toCat: targetBody.dataset.category
+          };
+        } else if (targetGroup2) {
+          var body2 = targetGroup2.querySelector('.pos-body');
+          if (body2) body2.classList.add('drag-over-body');
+          ptrDrag.dropTarget = {
+            type: 'tag_to_cat',
+            toCat: targetGroup2.dataset.category
+          };
+        }
+      }
+    }
+  }, { passive: false });
+
+  function handlePointerEnd(e) {
+    if (!ptrDrag) return;
+
+    var wasDragging = ptrDrag.isDragging;
+    var dragInfo = ptrDrag;
+    ptrDrag = null;
+
+    if (wasDragging) {
+      e.preventDefault();
+      e.stopPropagation();
+      lastDragEndTime = Date.now();
+
+      try {
+        if (dragInfo.el && dragInfo.el.releasePointerCapture) {
+          dragInfo.el.releasePointerCapture(dragInfo.pointerId);
+        }
+      } catch (err) {}
+
+      cleanupDragVisuals();
+
+      if (dragInfo.dropTarget) {
+        var dt = dragInfo.dropTarget;
+        if (dt.type === 'category') {
+          reorderCategory(dragInfo.cat, dt.targetCat, dt.isTop);
+        } else if (dt.type === 'tag_to_tag') {
+          moveOrReorderTag(dragInfo.cat, dragInfo.tag, dt.toCat, dt.targetTag, dt.isTop);
+        } else if (dt.type === 'tag_to_cat') {
+          moveOrReorderTag(dragInfo.cat, dragInfo.tag, dt.toCat, null, false);
+        }
+      }
+    } else {
+      cleanupDragVisuals();
+      // 未发生拖动位移，判定为纯点击，直接触发标签应用
+      if (dragInfo.type === 'tag' && dragInfo.tag) {
+        lastDragEndTime = Date.now();
+        appendDefect(dragInfo.tag);
+      }
+    }
+  }
+
+  window.addEventListener('pointerup', handlePointerEnd);
+  window.addEventListener('pointercancel', handlePointerEnd);
 
   /* ---- 分类与标签标准小弹窗编辑交互 ---- */
 
@@ -8196,7 +8354,7 @@
   if (btnOpenRecSettings) btnOpenRecSettings.addEventListener('click', function () { settingsPanel.classList.remove('show'); openRecommendModal(); });
 
   sideScroll.addEventListener('click', function (e) {
-    if (Date.now() - lastDragEndTime < 220) return; // 拖拽刚结束时避免误触发点击事件
+    if (Date.now() - lastDragEndTime < 350) return; // 拖拽刚结束时避免误触发点击事件
     if (e.target.closest('#restoreHidden')) { restoreHidden(); return; }
 
     // 缺陷分类区头部的两个快捷按钮
@@ -8793,8 +8951,14 @@
       }
 
       var cleanBlob = f.file || await f.handle.getFile();
-      var cleanUrl = URL.createObjectURL(cleanBlob);
-      var cleanImg = await loadImageElement(cleanUrl);
+      var cleanImg = null;
+      var cleanUrl = null;
+      if (!isBoxedImg && c && c.img && ((c.img.naturalWidth > 0) || (c.img.width > 0))) {
+        cleanImg = c.img;
+      } else {
+        cleanUrl = URL.createObjectURL(cleanBlob);
+        cleanImg = await loadImageElement(cleanUrl);
+      }
 
       // 核心支持：若在已标圈示图上继续圈示，底图以现有的圈示图为基底叠加新绘制的红框，并直接覆盖保存
       var baseImgForComposite = (isBoxedImg && c && c.img) ? c.img : cleanImg;
@@ -8812,7 +8976,9 @@
       } else {
         boxedBlob = cleanBlob;
       }
-      try { URL.revokeObjectURL(cleanUrl); } catch (e) {}
+      if (cleanUrl) {
+        try { URL.revokeObjectURL(cleanUrl); } catch (e) {}
+      }
 
       var [targetBoxed, targetOrig] = await Promise.all([
         subBoxedFolderHandle.getFileHandle(outFileName, { create: true }),
@@ -8839,10 +9005,12 @@
 
       // 输出清单精确映射：输出文件 → 原图（裸导线区段重命名/同塔相似名/重命名后失联全部根除）
       var manifestRel = f.relPath || fKey;
-      manifestSet('缺陷圈示图/' + subCategory + '/' + outFileName, name, manifestRel);
-      manifestSet('缺陷原图/' + subCategory + '/' + outFileName, name, manifestRel);
+      var curLinePfx = (m && m.prefix) || (f && f.prefix) || (nv && nv.full && nv.full.split('_')[0]) || (typeof window !== 'undefined' && window.__ACTIVE_LINE__) || '';
+      if (typeof window !== 'undefined') window.__ACTIVE_LINE__ = curLinePfx;
+      manifestSet('缺陷圈示图/' + subCategory + '/' + outFileName, name, manifestRel, curLinePfx);
+      manifestSet('缺陷原图/' + subCategory + '/' + outFileName, name, manifestRel, curLinePfx);
       if (isCritical && criticalFolderHandle) {
-        manifestSet('危急缺陷/' + outFileName, name, manifestRel);
+        manifestSet('危急缺陷/' + outFileName, name, manifestRel, curLinePfx);
       }
 
       m.saved = true;
@@ -8999,7 +9167,8 @@
       await w.close();
 
       // 输出清单精确映射：危急缺陷输出文件 → 原图
-      manifestSet('危急缺陷/' + outFileName, name, f.relPath || fKey);
+      var critLinePfx = (m && m.prefix) || (f && f.prefix) || (outFileName && outFileName.split('_')[0]) || (typeof window !== 'undefined' && window.__ACTIVE_LINE__) || '';
+      manifestSet('危急缺陷/' + outFileName, name, f.relPath || fKey, critLinePfx);
 
       m.saved = true;
       m.boxes = [];
@@ -9172,7 +9341,11 @@
   }
   function toFit(e) {
     var rect = getCanvasRect();
-    var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      return { x: 0, y: 0 };
+    }
+    var mx = ((e.clientX - rect.left) / rect.width) * state.view.w;
+    var my = ((e.clientY - rect.top) / rect.height) * state.view.h;
     var v = state.view;
     return { x: (mx - v.cx - v.panX) / v.zoom + v.cx, y: (my - v.cy - v.panY) / v.zoom + v.cy };
   }
@@ -9186,9 +9359,18 @@
     v.panX = mx - v.cx - (ix - v.cx) * nz;
     v.panY = my - v.cy - (iy - v.cy) * nz;
     v.zoom = nz;
-    render();
+    scheduleRedraw(applyInteraction);
   }
-  function scheduleRedraw(fn) { if (!rafPending) { rafPending = true; requestAnimationFrame(function () { rafPending = false; fn(); }); } }
+  function scheduleRedraw(fn) {
+    if (!rafPending) {
+      rafPending = true;
+      requestAnimationFrame(function () {
+        rafPending = false;
+        if (typeof fn === 'function') fn();
+        else render();
+      });
+    }
+  }
   function applyInteraction() {
     if (mode === 'draw' && dragBox && lastP) {
       dragBox.w = lastP.x - dragBox.x; dragBox.h = lastP.y - dragBox.y; renderOverlay();
@@ -9246,7 +9428,10 @@
     if (state.index < 0) return;
     if (e.button === 2) {
       e.preventDefault(); mode = 'pan';
-      panStart = { x: e.clientX, y: e.clientY, panX: state.view.panX, panY: state.view.panY };
+      var rect = getCanvasRect();
+      var sx = (rect && rect.width > 0) ? (state.view.w / rect.width) : 1;
+      var sy = (rect && rect.height > 0) ? (state.view.h / rect.height) : 1;
+      panStart = { x: e.clientX, y: e.clientY, panX: state.view.panX, panY: state.view.panY, sx: sx, sy: sy };
       overlayCanvas.style.cursor = 'grabbing';
       try { overlayCanvas.setPointerCapture(e.pointerId); } catch (err) {}
       return;
@@ -9294,9 +9479,12 @@
 
   overlayCanvas.addEventListener('pointermove', function (e) {
     if (mode === 'pan') {
-      state.view.panX = panStart.panX + (e.clientX - panStart.x);
-      state.view.panY = panStart.panY + (e.clientY - panStart.y);
-      scheduleRedraw(applyInteraction); return;
+      var sx = panStart.sx || 1;
+      var sy = panStart.sy || 1;
+      state.view.panX = panStart.panX + (e.clientX - panStart.x) * sx;
+      state.view.panY = panStart.panY + (e.clientY - panStart.y) * sy;
+      scheduleRedraw(applyInteraction);
+      return;
     }
     if (mode === 'idle') { updateHoverCursor(e); return; }
     lastP = toOriginal(e);
@@ -9336,11 +9524,55 @@
     if (mode === 'pan') overlayCanvas.style.cursor = 'crosshair';
     mode = 'idle'; dragData = null; dragBox = null; lastP = null; renderOverlay();
   });
+  var pendingWheelEvents = [];
+  var isWheelRafScheduled = false;
+
+  function flushWheelZoom() {
+    isWheelRafScheduled = false;
+    if (pendingWheelEvents.length === 0 || state.index < 0) return;
+    var rect = getCanvasRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      pendingWheelEvents = [];
+      return;
+    }
+
+    var v = state.view;
+    var zoomChanged = false;
+
+    for (var i = 0; i < pendingWheelEvents.length; i++) {
+      var ev = pendingWheelEvents[i];
+      var mx = ((ev.clientX - rect.left) / rect.width) * v.w;
+      var my = ((ev.clientY - rect.top) / rect.height) * v.h;
+      var nz = clampZoom(v.zoom * ev.factor);
+      if (nz !== v.zoom) {
+        var ix = (mx - v.cx - v.panX) / v.zoom + v.cx;
+        var iy = (my - v.cy - v.panY) / v.zoom + v.cy;
+        v.panX = mx - v.cx - (ix - v.cx) * nz;
+        v.panY = my - v.cy - (iy - v.cy) * nz;
+        v.zoom = nz;
+        zoomChanged = true;
+      }
+    }
+    pendingWheelEvents = [];
+
+    if (zoomChanged) {
+      render();
+    }
+  }
+
   overlayCanvas.addEventListener('wheel', function (e) {
     if (state.index < 0) return;
     e.preventDefault();
-    var rect = overlayCanvas.getBoundingClientRect();
-    zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    var factor = e.deltaY < 0 ? 1.12 : (1 / 1.12);
+    if (Math.abs(e.deltaY) < 60) {
+      var smoothFactor = Math.pow(0.9985, e.deltaY);
+      factor = Math.max(0.88, Math.min(1.14, smoothFactor));
+    }
+    pendingWheelEvents.push({ clientX: e.clientX, clientY: e.clientY, factor: factor });
+    if (!isWheelRafScheduled) {
+      isWheelRafScheduled = true;
+      requestAnimationFrame(flushWheelZoom);
+    }
   }, { passive: false });
   overlayCanvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   overlayCanvas.addEventListener('dblclick', function () { if (state.index < 0) return; fitView(state.view.w, state.view.h, state.view.s); render(); });
@@ -9562,43 +9794,55 @@
     });
   }
 
-  /* ================= 长按极速连切引擎（Hold-to-Fast-Scrub Engine） ================= */
+  /* ================= 长按极速连切引擎（Hold-to-Fast-Scrub Engine：防抖、防误触、防多跳） ================= */
   var activeHoldKey = null; // 'left' | 'right' | null
   var holdInitialTimer = null;
   var isScrubLoopRunning = false;
+  var isStepping = false;
+  var lastStepTime = 0;
 
   async function stepSwitch(dir) {
-    var baseIdx = (navTargetIndex >= 0) ? navTargetIndex : state.index;
-    var nextIdx = getNextFilteredIndex(baseIdx, dir);
-    if (nextIdx >= 0) {
-      navTargetIndex = nextIdx;
-      await switchTo(nextIdx);
-      return true;
-    } else {
-      var msg = (filterMode === 'all') ? (dir > 0 ? '已是最后一张照片' : '已是第一张照片') :
-                (filterMode === 'marked' ? (dir > 0 ? '已是最后一张已标记照片' : '已是第一张已标记照片') :
-                (filterMode === 'unmarked' ? (dir > 0 ? '已是最后一张未标记照片' : '已是第一张未标记照片') :
-                (dir > 0 ? '已是最后一张未看照片' : '已是第一张未看照片')));
-      toast(msg);
+    var now = performance.now();
+    // 基础防抖：距上次切图小于 70ms 的高频重复触发直接拦截（彻底杜绝按键微动双击/微抖多跳）
+    if (isStepping || (now - lastStepTime < 70)) {
       return false;
+    }
+    isStepping = true;
+    lastStepTime = now;
+
+    try {
+      var curIdx = (state.index >= 0) ? state.index : 0;
+      var nextIdx = getNextFilteredIndex(curIdx, dir);
+      if (nextIdx >= 0 && nextIdx !== state.index) {
+        navTargetIndex = nextIdx;
+        await switchTo(nextIdx);
+        return true;
+      } else {
+        if (nextIdx < 0 && state.files && state.files.length > 0) {
+          var msg = (filterMode === 'all') ? (dir > 0 ? '已是最后一张照片' : '已是第一张照片') :
+                    (filterMode === 'marked' ? (dir > 0 ? '已是最后一张已标记照片' : '已是第一张已标记照片') :
+                    (filterMode === 'unmarked' ? (dir > 0 ? '已是最后一张未标记照片' : '已是第一张未标记照片') :
+                    (dir > 0 ? '已是最后一张未看照片' : '已是第一张未看照片')));
+          toast(msg);
+        }
+        return false;
+      }
+    } finally {
+      isStepping = false;
     }
   }
 
-  async function startHoldScrub(direction) {
+  function startHoldScrub(direction) {
     var targetKeyType = direction > 0 ? 'right' : 'left';
     if (activeHoldKey === targetKeyType) return;
-    if (activeHoldKey !== null) stopHoldScrub();
+    stopHoldScrub();
 
     activeHoldKey = targetKeyType;
 
     // 1. 立即执行第 1 次切换（0ms 即点即切）
-    var moved = await stepSwitch(direction);
-    if (!moved || activeHoldKey !== targetKeyType) {
-      activeHoldKey = null;
-      return;
-    }
+    stepSwitch(direction);
 
-    // 2. 长按检测：按下持续 160ms 自动转入连续连切
+    // 2. 蓄力长按检测：必须长按超过 650ms 才进入连切模式，彻底杜绝单按/慢按误判多跳
     holdInitialTimer = setTimeout(async function () {
       holdInitialTimer = null;
       if (activeHoldKey !== targetKeyType || isScrubLoopRunning) return;
@@ -9611,14 +9855,13 @@
           if (!ok || activeHoldKey !== targetKeyType) break;
 
           var elapsed = performance.now() - t0;
-          // 速度曲线：保持每帧在屏幕停留 75ms（约 13 张/秒），既飞速流畅又确保左侧树高亮、统计数字与中间大图 100% 实时同步
-          var delay = Math.max(10, 75 - elapsed);
+          var delay = Math.max(50, 180 - elapsed);
           await new Promise(function (res) { setTimeout(res, delay); });
         }
       } finally {
         isScrubLoopRunning = false;
       }
-    }, 160);
+    }, 650);
   }
 
   function stopHoldScrub() {
@@ -9630,10 +9873,12 @@
   }
 
   function navNext() {
+    if (btnNext) btnNext.blur();
     stepSwitch(1);
   }
 
   function navPrev() {
+    if (btnPrev) btnPrev.blur();
     stepSwitch(-1);
   }
 
@@ -9685,12 +9930,8 @@
 
     if ((isLeftKey || isRightKey) && !isInput && !hasActiveModal) {
       e.preventDefault();
+      if (e.repeat) return; // 忽略操作系统原生按键连发，由引擎精准调度，杜绝长按原生重复导致的偶发多跳
       var dir = isRightKey ? 1 : -1;
-      var targetKeyType = isRightKey ? 'right' : 'left';
-      if (activeHoldKey === targetKeyType) {
-        // 浏览器原生按键重复事件由内部定时器托管
-        return;
-      }
       startHoldScrub(dir);
       return;
     }
@@ -9734,6 +9975,54 @@
   });
 
   btnSettings.addEventListener('click', function () { settingsPanel.classList.toggle('show'); });
+
+  // 界面缩放控制逻辑（支持自定义输入、步进调节与原生无感缩放）
+  var KEY_ZOOM = 'patrol_ui_zoom';
+  var btnZoomOut = $('btnZoomOut'), btnZoomIn = $('btnZoomIn'), btnZoomReset = $('btnZoomReset'), zoomInput = $('zoomInput');
+  function getSavedZoom() {
+    var val = parseFloat(localStorage.getItem(KEY_ZOOM));
+    return isNaN(val) || val < 0.5 || val > 2 ? 1 : val;
+  }
+  function applyZoom(scale) {
+    scale = Math.max(0.5, Math.min(2.0, Math.round(scale * 100) / 100));
+    try { localStorage.setItem(KEY_ZOOM, String(scale)); } catch (e) {}
+    var isTauri = !!(window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function');
+    if (isTauri) {
+      try { window.__TAURI__.core.invoke('set_zoom', { scale: scale }); } catch (e) {}
+      document.documentElement.style.zoom = '';
+    } else {
+      document.documentElement.style.zoom = scale;
+    }
+    invalidateCanvasRect();
+    var pct = Math.round(scale * 100);
+    if (zoomInput && document.activeElement !== zoomInput) zoomInput.value = pct;
+    if (typeof recomputeViewerStage === 'function') {
+      setTimeout(recomputeViewerStage, 50);
+    }
+  }
+  if (btnZoomOut) {
+    btnZoomOut.addEventListener('click', function () { applyZoom(getSavedZoom() - 0.05); });
+  }
+  if (btnZoomIn) {
+    btnZoomIn.addEventListener('click', function () { applyZoom(getSavedZoom() + 0.05); });
+  }
+  if (btnZoomReset) {
+    btnZoomReset.addEventListener('click', function () { applyZoom(1.0); });
+  }
+  if (zoomInput) {
+    zoomInput.addEventListener('change', function () {
+      var val = parseFloat(zoomInput.value);
+      if (!isNaN(val) && val >= 50 && val <= 200) {
+        applyZoom(val / 100);
+      } else {
+        zoomInput.value = Math.round(getSavedZoom() * 100);
+      }
+    });
+    zoomInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') zoomInput.blur();
+    });
+  }
+  applyZoom(getSavedZoom());
   themeSwitch.addEventListener('click', function () {
     theme = theme === 'dark' ? 'light' : 'dark';
     try { localStorage.setItem(KEY_THEME, theme); } catch (e) {}

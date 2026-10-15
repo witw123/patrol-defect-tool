@@ -11,6 +11,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use base64::Engine;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 #[derive(serde::Serialize)]
 struct Entry {
@@ -19,13 +20,20 @@ struct Entry {
 }
 
 fn decode_path(encoded: &str) -> Option<PathBuf> {
-    let bytes = B64.decode(encoded.trim()).ok()?;
-    let text = String::from_utf8(bytes).ok()?;
-    Some(PathBuf::from(text))
-}
+    let raw = encoded.trim();
+    let unescaped = percent_encoding::percent_decode_str(raw)
+        .decode_utf8()
+        .ok()?;
+    let clean = unescaped.trim();
+    let clean_no_pad = clean.trim_end_matches('=');
 
-fn encode_path(path: &Path) -> String {
-    B64.encode(path.to_string_lossy().as_bytes())
+    let decoded_bytes = B64.decode(clean_no_pad)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(clean))
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(clean_no_pad))
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(clean))
+        .ok()?;
+    let text = String::from_utf8(decoded_bytes).ok()?;
+    Some(PathBuf::from(text))
 }
 
 fn mime_of(path: &Path) -> &'static str {
@@ -46,6 +54,40 @@ fn mime_of(path: &Path) -> &'static str {
         Some("js") => "text/javascript",
         _ => "application/octet-stream",
     }
+}
+
+// 高速写入：JS 以原始字节为请求体（免 JSON/base64 序列化），路径放在头里。
+#[tauri::command]
+fn write_file_raw(request: tauri::ipc::Request) -> Result<(), String> {
+    use tauri::ipc::InvokeBody;
+    let encoded = request
+        .headers()
+        .get("x-file-path-b64")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| "缺少 x-file-path-b64 头".to_string())?;
+    let path = decode_path(encoded).ok_or_else(|| "路径解码失败".to_string())?;
+    match request.body() {
+        InvokeBody::Raw(bytes) => write_atomic(&path, bytes),
+        InvokeBody::Json(_) => Err("请求体应为原始字节".to_string()),
+    }
+}
+
+#[tauri::command]
+fn copy_file(from: String, to: String) -> Result<(), String> {
+    let to_path = Path::new(&to);
+    if let Some(parent) = to_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::copy(&from, to_path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_zoom(app: tauri::AppHandle, scale: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window.set_zoom(scale).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -94,9 +136,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     {
         let mut file = std::fs::File::create(&temp).map_err(|e| e.to_string())?;
         file.write_all(bytes).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
     }
-    std::fs::rename(&temp, path).map_err(|e| e.to_string())
+    if path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Err(e) = std::fs::rename(&temp, path) {
+        std::fs::write(path, bytes).map_err(|e2| format!("保存文件失败(重命名: {}, 直接写: {})", e, e2))?;
+        let _ = std::fs::remove_file(&temp);
+    }
+    Ok(())
 }
 
 fn rand_suffix() -> u128 {
@@ -233,12 +281,16 @@ fn main() {
             .title("巡检缺陷命名分类工具")
             .inner_size(1600.0, 950.0)
             .min_inner_size(1100.0, 680.0)
+            .drag_and_drop(false)
             .initialization_script(&init_state)
             .build()?;
             let _ = win.set_focus();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            set_zoom,
+            copy_file,
+            write_file_raw,
             app_data_dir,
             read_app_file,
             write_app_file,

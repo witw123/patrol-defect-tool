@@ -8,8 +8,28 @@
   function b64urlEncode(text) {
     var bytes = new TextEncoder().encode(text);
     var binary = '';
-    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_');
+    var step = 0x8000;
+    for (var i = 0; i < bytes.length; i += step)
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  // 二进制快速通道：ArrayBuffer 请求体 + 自定义头携带路径，绕开 JSON/base64 序列化。
+  async function writeRaw(path, bytes) {
+    var buffer = (bytes && bytes.buffer && bytes.byteLength === bytes.buffer.byteLength)
+      ? bytes.buffer
+      : (bytes && bytes.buffer ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes);
+    try {
+      return await window.__TAURI__.core.invoke('write_file_raw', buffer, {
+        headers: { 'x-file-path-b64': b64urlEncode(path) }
+      });
+    } catch (e) {
+      console.warn('write_file_raw 写入受阻，自动转入 write_file_base64 保障通道:', e);
+      return await invoke('write_file_base64', {
+        path: path,
+        data: bytesToBase64(new Uint8Array(buffer))
+      });
+    }
   }
 
   function bytesToBase64(bytes) {
@@ -31,8 +51,12 @@
     return 'http://pdefile.localhost/' + b64urlEncode(path);
   }
 
+  function normPath(p) {
+    return (p || '').replace(/[\\/]+$/, '');
+  }
+
   function joinPath(dir, name) {
-    return dir.replace(/[\\/]+$/, '') + '\\' + name;
+    return normPath(dir) + '\\' + name;
   }
 
   function parentOf(path) {
@@ -50,6 +74,82 @@
     return table[ext] || 'application/octet-stream';
   }
 
+  function extractWholeLine(rawStr, rootHint) {
+    var s = String(rawStr || '').trim();
+    var root = String(rootHint || (typeof window !== 'undefined' && (window.savedInputName || window.__ACTIVE_LINE__)) || '').trim();
+
+    // 如果 root 提供了明确的整条线路名（以线路/专线/联络线/回线/工程/线 结尾），提取出根主线
+    var rootLineRegex = /^(?:(?:\d+\s*(?:k|kV|KV|千伏))?[\u4e00-\u9fa5\u2160-\u217fA-Za-z0-9_#\-\(\)（）]+?(?:\d+)?(?:线路|专线|联络线|回线|工程|线))/i;
+    var rm = root ? root.match(rootLineRegex) : null;
+    var rootWhole = rm ? rm[0].trim() : '';
+
+    // 如果待提取字符串以 rootWhole 开头，或自身是支线/分支/变台，直接归入 rootWhole
+    if (rootWhole && (s.startsWith(rootWhole) || /^(?:主线|支线|分支|变台)/.test(s) || s.endsWith('支线') || s.endsWith('分支') || /#变/.test(s))) {
+      return rootWhole;
+    }
+
+    // 1. 匹配带电压等级的标准线路名：如 10kV八联141线、10kV临沟121线、35kV城关线
+    var volLineRegex = /^(?:(?:\d+\s*(?:k|kV|KV|千伏))[\u4e00-\u9fa5\u2160-\u217fA-Za-z0-9_#\-\(\)（）]+?(?:\d+)?(?:线路|专线|联络线|回线|工程|线))/i;
+    var vm = s.match(volLineRegex);
+    if (vm) {
+      return vm[0].trim();
+    }
+
+    // 2. 如果没有电压等级，但以明确的线路名开头，且后面跟着主线/支线/分支/#变等
+    var branchSplitRegex = /^(.+?(?:线路|专线|联络线|回线|工程|线))(?:主线|支线|分支|变台|#变|东分|西分|南分|北分|[\u4e00-\u9fa50-9_#\-]*?(?:支线|分支|#变)).*$/;
+    var sm = s.match(branchSplitRegex);
+    if (sm && sm[1]) {
+      return sm[1].trim();
+    }
+
+    // 3. 通用线路匹配（无电压等级）：如 八联141线
+    var genLineRegex = /^([\u4e00-\u9fa5\u2160-\u217fA-Za-z0-9_#\-\(\)（）]+?(?:\d+)?(?:线路|专线|联络线|回线|工程|线))/;
+    var gm = s.match(genLineRegex);
+    if (gm) {
+      var cand = gm[1].trim();
+      if (!/^(?:主线|支线|分支)$/.test(cand) && !cand.endsWith('支线') && !cand.endsWith('分支')) {
+        return cand;
+      }
+    }
+
+    if (rootWhole) return rootWhole;
+    return s || '默认线路';
+  }
+  window.extractWholeLine = extractWholeLine;
+
+  function extractLineFromKeyOrEntry(outRelPath, mEnt) {
+    var raw = '';
+    if (mEnt && mEnt.line) raw = String(mEnt.line).trim();
+    if (!raw && outRelPath) {
+      var slashIdx = outRelPath.lastIndexOf('/');
+      var fname = slashIdx >= 0 ? outRelPath.slice(slashIdx + 1) : outRelPath;
+      var parts = fname.split('_');
+      if (parts.length >= 2 && parts[0].trim()) {
+        var cand = parts[0].trim();
+        if (!/^(?:DJI|IMG|DSC|DCIM|PANO|VID|SCREENSHOT|QQ图片|微信图片)/i.test(cand)) {
+          raw = cand;
+        }
+      }
+    }
+    if (!raw && mEnt && mEnt.relPath) {
+      var relParts = String(mEnt.relPath).replace(/\\/g, '/').split('/').filter(Boolean);
+      if (relParts.length > 1) {
+        var cand2 = relParts[0].trim();
+        if (!/^(?:DJI|IMG|DSC|DCIM|PANO|VID|SCREENSHOT)/i.test(cand2) && !/^#?\d+/.test(cand2)) {
+          raw = cand2;
+        }
+      }
+    }
+    if (!raw && typeof window !== 'undefined' && window.__ACTIVE_LINE__) {
+      raw = String(window.__ACTIVE_LINE__).trim();
+    }
+    return extractWholeLine(raw);
+  }
+
+  function sanitizeLineName(name) {
+    return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+  }
+
   // ---------- 文件句柄 ----------
   function ShimFileHandle(path, name) {
     this.__path = path;
@@ -59,37 +159,155 @@
   }
 
   ShimFileHandle.prototype.getFile = async function () {
+    if (this.__manifestContent !== undefined) {
+      return new File([this.__manifestContent], this.__name, { type: 'application/json' });
+    }
+    try {
+      var res = await fetch(fileUrl(this.__path));
+      if (res.ok) {
+        var blob = await res.blob();
+        var file = new File([blob], this.__name, { type: mimeOf(this.__name) });
+        file.__sourcePath = this.__path;
+        return file;
+      }
+    } catch (e) { }
     var base64 = await invoke('read_file_base64', { path: this.__path });
     var bytes = b64Decode(base64);
-    return new File([bytes], this.__name, { type: mimeOf(this.__name) });
+    var fallbackFile = new File([bytes], this.__name, { type: mimeOf(this.__name) });
+    fallbackFile.__sourcePath = this.__path;
+    return fallbackFile;
   };
 
   ShimFileHandle.prototype.createWritable = async function () {
     var path = this.__path;
     var handleName = this.__name;
     var chunks = [];
+    var directCopySource = null;
     return {
       write: async function (data) {
+        if (data && data.__sourcePath && chunks.length === 0) {
+          directCopySource = data.__sourcePath;
+          return;
+        }
+        directCopySource = null;
         if (data instanceof Blob) chunks.push(new Uint8Array(await data.arrayBuffer()));
         else if (data instanceof ArrayBuffer) chunks.push(new Uint8Array(data));
         else if (data && data.buffer) chunks.push(new Uint8Array(data.buffer || data));
         else chunks.push(new TextEncoder().encode(String(data)));
       },
       close: async function () {
+        if (handleName === '输出清单.json') {
+          // 清单只存安装目录数据区，绝对不落输出目录；按整条线路（整个线，非支线）独立保存清单，杜绝碎片化与重复。
+          var textContent = '';
+          if (chunks.length > 0) {
+            var total = 0;
+            chunks.forEach(function (c) { total += c.length; });
+            var merged = new Uint8Array(total);
+            var offset = 0;
+            chunks.forEach(function (c) { merged.set(c, offset); offset += c.length; });
+            textContent = new TextDecoder().decode(merged);
+          }
+
+          var parsedObj = null;
+          try { parsedObj = JSON.parse(textContent); } catch (e) {}
+          var allEntries = (parsedObj && parsedObj.entries && typeof parsedObj.entries === 'object') ? parsedObj.entries : {};
+          var byLine = {};
+          var keys = Object.keys(allEntries);
+
+          for (var k = 0; k < keys.length; k++) {
+            var outKey = keys[k];
+            var mEnt = allEntries[outKey];
+            var lineName = extractLineFromKeyOrEntry(outKey, mEnt);
+            var safeLine = sanitizeLineName(lineName);
+            if (!safeLine || safeLine === '默认线路') safeLine = '';
+            if (!byLine[safeLine]) byLine[safeLine] = {};
+            byLine[safeLine][outKey] = mEnt;
+          }
+
+          // 查出当前已有的清单文件：清理旧的支线清单文件（直接删，合并入整线），只保留整个线的清单
+          var existingManifestLines = new Set();
+          try {
+            var appDir = await invoke('app_data_dir');
+            var existingFiles = await invoke('list_entries', { path: appDir });
+            for (var ei = 0; ei < existingFiles.length; ei++) {
+              var ef = existingFiles[ei];
+              if (!ef.is_dir && ef.name.startsWith('输出清单_') && ef.name.endsWith('.json')) {
+                var lName = ef.name.slice('输出清单_'.length, ef.name.length - '.json'.length);
+                var whole = sanitizeLineName(extractWholeLine(lName));
+                if (lName && whole && lName !== whole) {
+                  // 这是旧的支线清单文件（如 输出清单_10kV临沟121线东沟村10#变.json），合并其条目到整个线后直接物理删除！
+                  try {
+                    var oldRaw = await invoke('read_app_file', { name: ef.name });
+                    if (oldRaw) {
+                      var oldObj = JSON.parse(oldRaw);
+                      if (oldObj && oldObj.entries && typeof oldObj.entries === 'object') {
+                        if (!byLine[whole]) byLine[whole] = {};
+                        for (var oldK in oldObj.entries) {
+                          if (!byLine[whole][oldK]) {
+                            byLine[whole][oldK] = oldObj.entries[oldK];
+                          }
+                        }
+                      }
+                    }
+                  } catch (err) {}
+                  try {
+                    await invoke('remove_entry', { path: joinPath(appDir, ef.name), recursive: false });
+                  } catch (e) {}
+                  existingManifestLines.add(whole);
+                } else if (whole) {
+                  existingManifestLines.add(whole);
+                }
+              }
+            }
+          } catch (e) {}
+
+          var targetLines = new Set([...Object.keys(byLine), ...existingManifestLines]);
+          if (targetLines.size === 0) {
+            await invoke('write_app_file', {
+              name: '输出清单.json',
+              content: textContent || '{"version":1,"entries":{}}'
+            });
+          } else {
+            for (var sLine of targetLines) {
+              var lineManifestName = sLine ? ('输出清单_' + sLine + '.json') : '输出清单.json';
+              var entriesForLine = byLine[sLine] || {};
+              var entryCount = Object.keys(entriesForLine).length;
+              if (entryCount === 0 && sLine) {
+                // 若该线路已无条目，清理空清单
+                try {
+                  var appDir2 = await invoke('app_data_dir');
+                  await invoke('remove_entry', { path: joinPath(appDir2, lineManifestName), recursive: false });
+                } catch (e) {}
+                continue;
+              }
+              var filePayload = JSON.stringify({
+                version: 1,
+                savedAt: new Date().toISOString(),
+                line: sLine || '默认线路',
+                entries: entriesForLine
+              }, null, 2);
+              await invoke('write_app_file', {
+                name: lineManifestName,
+                content: filePayload
+              });
+            }
+          }
+          return;
+        }
+        if (directCopySource) {
+          try {
+            await invoke('copy_file', { from: directCopySource, to: path });
+            return;
+          } catch (e) {
+            console.warn('copy_file 失败，回退常规写入:', e);
+          }
+        }
         var total = 0;
         chunks.forEach(function (c) { total += c.length; });
         var merged = new Uint8Array(total);
         var offset = 0;
         chunks.forEach(function (c) { merged.set(c, offset); offset += c.length; });
-        await invoke('write_file_base64', { path: path, data: bytesToBase64(merged) });
-        if (handleName === '输出清单.json') {
-          try {
-            await invoke('write_app_file', {
-              name: 'manifest-' + b64urlEncode(parentOf(path)) + '.json',
-              content: new TextDecoder().decode(merged)
-            });
-          } catch (e) { }
-        }
+        await writeRaw(path, merged);
       }
     };
   };
@@ -97,6 +315,10 @@
   ShimFileHandle.prototype.move = async function (newName) {
     this.__path = await invoke('rename_entry', { path: this.__path, newName: newName });
     this.__name = newName;
+  };
+
+  ShimFileHandle.prototype.remove = async function () {
+    return invoke('remove_entry', { path: this.__path, recursive: false });
   };
 
   ShimFileHandle.prototype.isSameEntry = function (other) {
@@ -148,19 +370,94 @@
   };
 
   ShimDirHandle.prototype.getFileHandle = async function (name, options) {
+    // 输出清单不再存输出目录：内容只保存在安装目录数据区，读写均虚拟转发。
+    if (name === '输出清单.json') {
+      var child0 = joinPath(this.__path, name);
+      if (await invoke('exists', { path: child0 })) {
+        await invoke('remove_entry', { path: child0, recursive: false });
+      }
+
+      var appDir = await invoke('app_data_dir');
+      var entries = await invoke('list_entries', { path: appDir });
+      var mergedEntries = {};
+
+      for (var i = 0; i < entries.length; i++) {
+        var ent = entries[i];
+        if (ent.is_dir) continue;
+        var ename = ent.name;
+
+        // 清理旧版残留的废弃 manifest-*.json 文件（直接删，不留向后兼容）
+        if (ename.startsWith('manifest-') && ename.endsWith('.json')) {
+          try {
+            await invoke('remove_entry', { path: joinPath(appDir, ename), recursive: false });
+          } catch (e) {}
+          continue;
+        }
+
+        // 读取所有合法的输出清单：输出清单_*.json、*_输出清单.json、输出清单.json
+        var isManifest = (ename === '输出清单.json') ||
+                         (ename.startsWith('输出清单_') && ename.endsWith('.json')) ||
+                         (ename.endsWith('_输出清单.json'));
+        if (isManifest) {
+          var raw = await invoke('read_app_file', { name: ename });
+          if (raw) {
+            try {
+              var obj = JSON.parse(raw);
+              if (obj && obj.entries && typeof obj.entries === 'object') {
+                Object.assign(mergedEntries, obj.entries);
+              }
+            } catch (e) {}
+          }
+          if (ename.startsWith('输出清单_') && ename.endsWith('.json')) {
+            var rawName = ename.slice('输出清单_'.length, ename.length - '.json'.length);
+            var whole = sanitizeLineName(extractWholeLine(rawName));
+            if (rawName && whole && rawName !== whole) {
+              // 标记存在旧的支线清单文件
+              try {
+                await invoke('remove_entry', { path: joinPath(appDir, ename), recursive: false });
+              } catch (e) {}
+            }
+          }
+        }
+      }
+
+      // 如果有条目，按整个线重新组织并确保保存为整线清单文件，清理碎片化的支线文件
+      if (Object.keys(mergedEntries).length > 0) {
+        var byWholeLine = {};
+        for (var outK in mergedEntries) {
+          var mEnt = mergedEntries[outK];
+          var wLine = sanitizeLineName(extractLineFromKeyOrEntry(outK, mEnt));
+          if (!wLine || wLine === '默认线路') wLine = '';
+          if (!byWholeLine[wLine]) byWholeLine[wLine] = {};
+          byWholeLine[wLine][outK] = mEnt;
+        }
+        for (var wName of Object.keys(byWholeLine)) {
+          var lineManifestName = wName ? ('输出清单_' + wName + '.json') : '输出清单.json';
+          var filePayload = JSON.stringify({
+            version: 1,
+            savedAt: new Date().toISOString(),
+            line: wName || '默认线路',
+            entries: byWholeLine[wName]
+          }, null, 2);
+          try {
+            await invoke('write_app_file', {
+              name: lineManifestName,
+              content: filePayload
+            });
+          } catch (e) {}
+        }
+      }
+
+      var handle = new ShimFileHandle(joinPath(this.__path, name), name);
+      handle.__manifestContent = JSON.stringify({
+        version: 1,
+        savedAt: new Date().toISOString(),
+        entries: mergedEntries
+      });
+      return handle;
+    }
     var child = joinPath(this.__path, name);
     var exists = await invoke('exists', { path: child });
-    if (!exists && name === '输出清单.json') {
-      // 安装目录有镜像而输出目录丢失时，自动还原，保证清单不丢。
-      var mirror = await invoke('read_app_file', {
-        name: 'manifest-' + b64urlEncode(this.__path) + '.json'
-      });
-      if (mirror) {
-        var raw = new TextEncoder().encode(mirror);
-        await invoke('write_file_base64', { path: child, data: bytesToBase64(raw) });
-        exists = true;
-      }
-    }
     if (!exists) {
       if (options && options.create) {
         await invoke('write_file_base64', { path: child, data: '' });
@@ -312,6 +609,15 @@
   // 标记 shim 就绪，便于排查加载顺序问题。
   window.__patrolShimReady = true;
 
+  // ---------- 界面缩放支持 ----------
+  var ZOOM_KEY = 'patrol_ui_zoom';
+  function applyZoom(scale) {
+    try {
+      if (invoke) invoke('set_zoom', { scale: Number(scale) });
+    } catch (e) { }
+  }
+  window.__patrolApplyZoom = applyZoom;
+
   // ---------- 界面修饰（仅外观，不动逻辑） ----------
   // 1. 去掉顶部工具栏下方出现的横向滚动条；
   // 2. 左下角设置齿轮按钮被渲染成黑块，固定为主题底色（浅色白底深字，深色反之）。
@@ -322,5 +628,11 @@
     'body.dark #btnSettings { background: #1F1F1F !important; color: #F5F5F5 !important; border-color: #3A3A3A !important; }';
   document.addEventListener('DOMContentLoaded', function () {
     document.head.appendChild(style);
+    try {
+      var saved = parseFloat(localStorage.getItem(ZOOM_KEY));
+      if (!isNaN(saved) && saved >= 0.5 && saved <= 2) {
+        applyZoom(saved);
+      }
+    } catch (e) {}
   });
 })();
