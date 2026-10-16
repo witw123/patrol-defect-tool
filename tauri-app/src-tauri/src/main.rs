@@ -129,30 +129,107 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let temp = path.with_file_name(format!(
-        ".{}.tmp",
-        std::process::id() as u128 + rand_suffix()
-    ));
+
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    // 固定临时文件名，避免生成带随机数的孤儿临时文件累积堆积
+    let temp = path.with_file_name(format!(".{}.tmp", file_name));
+
+    // 1. 写入固定临时文件并显式刷盘、关闭句柄
     {
-        let mut file = std::fs::File::create(&temp).map_err(|e| e.to_string())?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temp)
+            .map_err(|e| e.to_string())?;
         file.write_all(bytes).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
     }
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
+
+    // 2. 尝试安全替换目标文件（重试3次避让 Windows 杀毒软件/索引短暂占用）
+    let mut renamed = false;
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
+        if std::fs::rename(&temp, path).is_ok() {
+            renamed = true;
+            break;
+        }
     }
-    if let Err(e) = std::fs::rename(&temp, path) {
-        std::fs::write(path, bytes).map_err(|e2| format!("保存文件失败(重命名: {}, 直接写: {})", e, e2))?;
-        let _ = std::fs::remove_file(&temp);
+
+    // 3. 若重命名失败，回退为直接覆盖写目标文件，并清理临时文件
+    if !renamed {
+        std::fs::write(path, bytes).map_err(|e| format!("写入文件失败: {}", e))?;
+        for attempt in 0..3 {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+            if std::fs::remove_file(&temp).is_ok() {
+                break;
+            }
+        }
     }
+
     Ok(())
 }
 
-fn rand_suffix() -> u128 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos() as u128)
-        .unwrap_or(0)
+fn clean_stale_tmp_files(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if (name.starts_with('.') && name.ends_with(".tmp")) || name.ends_with(".tmp") {
+                        let _ = std::fs::remove_file(&p);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn sanitize_patrol_map(map: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let allowed_prefixes = ["xunjian_", "patrol_", "__pdefile_"];
+    let allowed_exact = [
+        "theme",
+        "noPrompt",
+        "uiZoom",
+        "leftWidth",
+        "rightWidth",
+        "strokeWidth",
+        "inputDirName",
+        "outputDirName",
+        "defectDict",
+        "locationAdjacency",
+        "candidatePool",
+        "hiddenDefects",
+        "viewedPhotosMap",
+        "criticalDefects",
+        "autoCategoryRules",
+    ];
+
+    let orig_len = map.len();
+    map.retain(|k, v| {
+        let is_allowed = allowed_exact.contains(&k.as_str())
+            || allowed_prefixes.iter().any(|prefix| k.starts_with(prefix));
+        if !is_allowed {
+            return false;
+        }
+        if let serde_json::Value::String(s) = v {
+            if s.len() > 3_000_000 {
+                return false;
+            }
+        }
+        true
+    });
+    map.len() != orig_len
 }
 
 #[tauri::command]
@@ -235,6 +312,9 @@ fn data_dir() -> Result<PathBuf, String> {
         std::fs::create_dir_all(&candidate).map_err(|e| e.to_string())?;
         Ok(candidate)
     })();
+    if let Ok(ref dir) = resolved {
+        clean_stale_tmp_files(dir);
+    }
     let _ = DIR.set(resolved.clone());
     resolved
 }
@@ -290,12 +370,32 @@ fn write_app_file(name: String, content: String) -> Result<String, String> {
 }
 
 fn main() {
+    if let Ok(dir) = data_dir() {
+        clean_stale_tmp_files(&dir);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            clean_stale_tmp_files(&parent.join("data"));
+        }
+    }
+
     let stored_state = read_app_file("localStorage.json".to_string()).unwrap_or_default();
     let init_state = if stored_state.trim().is_empty() {
         "window.__PATROL_DATA__ = {};".to_string()
     } else {
         match serde_json::from_str::<serde_json::Value>(&stored_state) {
-            Ok(val) => format!("window.__PATROL_DATA__ = {};", val),
+            Ok(mut val) => {
+                let mut changed = false;
+                if let serde_json::Value::Object(ref mut map) = val {
+                    changed = sanitize_patrol_map(map);
+                }
+                if changed {
+                    if let Ok(cleaned_str) = serde_json::to_string(&val) {
+                        let _ = write_app_file("localStorage.json".to_string(), cleaned_str);
+                    }
+                }
+                format!("window.__PATROL_DATA__ = {};", val)
+            }
             Err(_) => "window.__PATROL_DATA__ = {};".to_string(),
         }
     };

@@ -442,18 +442,60 @@
   var __nativeStorage = null;
   try { __nativeStorage = window.localStorage; } catch (e) {}
 
+  var ALLOWED_KEY_PREFIXES = ['xunjian_', 'patrol_', '__pdefile_'];
+  var ALLOWED_EXACT_KEYS = {
+    'theme': 1, 'noPrompt': 1, 'uiZoom': 1,
+    'leftWidth': 1, 'rightWidth': 1, 'strokeWidth': 1,
+    'inputDirName': 1, 'outputDirName': 1,
+    'defectDict': 1, 'locationAdjacency': 1, 'candidatePool': 1, 'hiddenDefects': 1,
+    'viewedPhotosMap': 1, 'criticalDefects': 1, 'autoCategoryRules': 1
+  };
+
+  function isAllowedKey(k) {
+    if (!k || typeof k !== 'string') return false;
+    if (ALLOWED_EXACT_KEYS[k]) return true;
+    for (var i = 0; i < ALLOWED_KEY_PREFIXES.length; i++) {
+      if (k.indexOf(ALLOWED_KEY_PREFIXES[i]) === 0) return true;
+    }
+    return false;
+  }
+
+  function sanitizeStore(store) {
+    if (!store || typeof store !== 'object') return false;
+    var changed = false;
+    var keys = Object.keys(store);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (!isAllowedKey(k)) {
+        delete store[k];
+        changed = true;
+        continue;
+      }
+      var v = store[k];
+      if (typeof v === 'string' && v.length > 3000000) {
+        delete store[k];
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   var __patrolStore = (window.__PATROL_DATA__ && typeof window.__PATROL_DATA__ === 'object')
     ? window.__PATROL_DATA__ : {};
+  var __initialCleaned = sanitizeStore(__patrolStore);
   var __patrolTimer = null;
 
-  // 1. 如果原生 webview localStorage 中有旧数据，迁移进 __patrolStore（防止老版本数据丢失）
+  // 1. 如果原生 webview localStorage 中有旧数据，仅迁移合法白名单业务键（绝不混入未知大对象）
   if (__nativeStorage && typeof __nativeStorage.getItem === 'function') {
     try {
       for (var ni = 0; ni < __nativeStorage.length; ni++) {
         var nk = __nativeStorage.key(ni);
-        if (nk && !Object.prototype.hasOwnProperty.call(__patrolStore, nk)) {
+        if (nk && isAllowedKey(nk) && !Object.prototype.hasOwnProperty.call(__patrolStore, nk)) {
           var nv = __nativeStorage.getItem(nk);
-          if (nv !== null) __patrolStore[nk] = nv;
+          if (nv !== null && (typeof nv !== 'string' || nv.length <= 3000000)) {
+            __patrolStore[nk] = nv;
+            __initialCleaned = true;
+          }
         }
       }
     } catch (e) {}
@@ -468,9 +510,12 @@
         if (parsed && typeof parsed === 'object') {
           var hasNew = false;
           for (var pk in parsed) {
-            if (!Object.prototype.hasOwnProperty.call(__patrolStore, pk)) {
-              __patrolStore[pk] = parsed[pk];
-              hasNew = true;
+            if (isAllowedKey(pk) && !Object.prototype.hasOwnProperty.call(__patrolStore, pk)) {
+              var pv = parsed[pk];
+              if (pv !== null && (typeof pv !== 'string' || pv.length <= 3000000)) {
+                __patrolStore[pk] = pv;
+                hasNew = true;
+              }
             }
           }
           if (hasNew) {
@@ -486,6 +531,7 @@
   }
 
   function persistStore(immediate) {
+    sanitizeStore(__patrolStore);
     if (immediate) {
       if (__patrolTimer) {
         clearTimeout(__patrolTimer);
@@ -503,7 +549,7 @@
       }
       return;
     }
-    // 防抖写入：200ms 后置持久化，连续翻图期间绝不阻塞，翻图停顿或离开时自动落盘
+    // 防抖写入：350ms 后置持久化，连续翻图期间绝不阻塞，翻图停顿或离开时自动落盘
     if (__patrolTimer) clearTimeout(__patrolTimer);
     __patrolTimer = setTimeout(function () {
       __patrolTimer = null;
@@ -517,7 +563,11 @@
       } catch (e) {
         console.warn('[Storage] debounced invoke error:', e);
       }
-    }, 200);
+    }, 350);
+  }
+
+  if (__initialCleaned) {
+    persistStore(true);
   }
 
   function SimpleStorage() { }
