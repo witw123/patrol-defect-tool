@@ -503,8 +503,8 @@
       }
       return;
     }
-    // 节流写入：80ms 快速持久化，避免用户连续切图时无休止推迟保存
-    if (__patrolTimer) return;
+    // 防抖写入：200ms 后置持久化，连续翻图期间绝不阻塞，翻图停顿或离开时自动落盘
+    if (__patrolTimer) clearTimeout(__patrolTimer);
     __patrolTimer = setTimeout(function () {
       __patrolTimer = null;
       try {
@@ -517,7 +517,7 @@
       } catch (e) {
         console.warn('[Storage] debounced invoke error:', e);
       }
-    }, 80);
+    }, 200);
   }
 
   function SimpleStorage() { }

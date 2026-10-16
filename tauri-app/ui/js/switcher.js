@@ -564,7 +564,7 @@
       saveViewedPhotos();
     }
 
-    if (isNewlyViewed) {
+    if (isNewlyViewed && filterMode === 'unviewed') {
       invalidateFilterList();
     }
 

@@ -286,16 +286,6 @@ fn write_app_file(name: String, content: String) -> Result<String, String> {
     let dir = data_dir()?;
     let target = dir.join(&name);
     write_atomic(&target, content.as_bytes())?;
-    // 如果 exe 同级存在可写的 data 目录，同时镜像写入一份，保障便携模式同步
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let alt_dir = parent.join("data");
-            if alt_dir.is_dir() && alt_dir != dir {
-                let alt_target = alt_dir.join(&name);
-                let _ = write_atomic(&alt_target, content.as_bytes());
-            }
-        }
-    }
     Ok(target.to_string_lossy().to_string())
 }
 

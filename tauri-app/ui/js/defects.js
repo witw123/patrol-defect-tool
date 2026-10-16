@@ -266,17 +266,16 @@
       }
       return;
     }
-    // 实时保存：60ms 节流落盘，切一张存一张，连续翻图不推迟
-    if (saveViewedTimer) return;
+    // 连续切图时采用后置防抖（350ms）：用户快速翻图期间绝对不触发序列化与写盘，停顿或退出时自动落盘
+    if (saveViewedTimer) clearTimeout(saveViewedTimer);
     saveViewedTimer = setTimeout(function () {
       saveViewedTimer = null;
       try {
         localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap));
-        if (typeof localStorage.flush === "function") localStorage.flush();
       } catch (e) {
         console.warn("saveViewedPhotos error:", e);
       }
-    }, 60);
+    }, 350);
   }
   window.addEventListener("beforeunload", function () {
     saveViewedPhotos(true);
@@ -308,14 +307,20 @@
         var obj = JSON.parse(raw);
         if (obj && typeof obj === 'object') {
           for (var k in obj) {
-            if (obj[k]) viewedPhotosMap[k] = true;
+            if (obj[k]) {
+              viewedPhotosMap[k] = true;
+              if (k.indexOf('\\') >= 0) viewedPhotosMap[k.replace(/\\/g, '/')] = true;
+            }
           }
         }
       }
       // 如果已有已标照片，自动并入已看集合
       if (typeof state !== 'undefined' && state && state.markedFiles) {
         state.markedFiles.forEach(function (mk) {
-          if (mk) viewedPhotosMap[mk] = true;
+          if (mk) {
+            viewedPhotosMap[mk] = true;
+            if (mk.indexOf('\\') >= 0) viewedPhotosMap[mk.replace(/\\/g, '/')] = true;
+          }
         });
       }
     } catch (e) {

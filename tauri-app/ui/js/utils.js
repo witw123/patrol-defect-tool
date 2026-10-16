@@ -119,7 +119,7 @@
   function fileKey(f) {
     if (!f) return '';
     if (typeof f === 'string') return f;
-    return f.relPath || f.name || '';
+    return f._key || (f._key = f.relPath || f.name || '');
   }
   function curFile() { return (state.index >= 0 && state.files) ? state.files[state.index] : null; }
   function curName() { var f = curFile(); return f ? f.name : null; }
@@ -128,36 +128,14 @@
   function isFileViewed(f) {
     if (!f) return false;
     var k = fileKey(f);
-
-    // 1. 如果该图片已标记了缺陷（在输出目录中有缺陷圈示图或输出原图），绝对属于已看图片
+    if (viewedPhotosMap) {
+      if (viewedPhotosMap[k]) return true;
+      if (f.name && viewedPhotosMap[f.name]) return true;
+    }
     if (state && state.markedFiles) {
-      if (k && state.markedFiles.has(k)) return true;
+      if (state.markedFiles.has(k)) return true;
       if (f.name && state.markedFiles.has(f.name)) return true;
-      if (f.relPath) {
-        if (state.markedFiles.has(f.relPath)) return true;
-        if (state.markedFiles.has(f.relPath.replace(/\\/g, '/'))) return true;
-        if (state.markedFiles.has(f.relPath.replace(/\//g, '\\'))) return true;
-      }
     }
-    if (state && state.markedCounts) {
-      if (k && (state.markedCounts.get(k) || 0) > 0) return true;
-      if (f.name && (state.markedCounts.get(f.name) || 0) > 0) return true;
-      if (f.relPath) {
-        if ((state.markedCounts.get(f.relPath) || 0) > 0) return true;
-        if ((state.markedCounts.get(f.relPath.replace(/\\/g, '/')) || 0) > 0) return true;
-        if ((state.markedCounts.get(f.relPath.replace(/\//g, '\\')) || 0) > 0) return true;
-      }
-    }
-
-    // 2. 查阅持久化的已看记录映射
-    if (!viewedPhotosMap) return false;
-    if (k && viewedPhotosMap[k]) return true;
-    if (f.relPath) {
-      if (viewedPhotosMap[f.relPath]) return true;
-      if (viewedPhotosMap[f.relPath.replace(/\\/g, '/')]) return true;
-      if (viewedPhotosMap[f.relPath.replace(/\//g, '\\')]) return true;
-    }
-    if (f.name && viewedPhotosMap[f.name]) return true;
     return false;
   }
 
@@ -166,11 +144,6 @@
     var isNew = !isFileViewed(f);
     var k = fileKey(f);
     if (k) viewedPhotosMap[k] = true;
-    if (f.relPath) {
-      viewedPhotosMap[f.relPath] = true;
-      viewedPhotosMap[f.relPath.replace(/\\/g, '/')] = true;
-      viewedPhotosMap[f.relPath.replace(/\//g, '\\')] = true;
-    }
     if (f.name) viewedPhotosMap[f.name] = true;
     if (typeof state !== 'undefined' && state && state.index >= 0) {
       if (state.index > (state.lastViewedIndex || -1)) {
