@@ -439,27 +439,50 @@
 
   // ---------- localStorage -> 安装目录数据文件（已看缓存/字典/主题/目录记忆等全部持久化） ----------
   // Rust 启动时把 data/localStorage.json 注入 window.__PATROL_DATA__，这里同步接管后节流写回。
+  var __nativeStorage = null;
+  try { __nativeStorage = window.localStorage; } catch (e) {}
+
   var __patrolStore = (window.__PATROL_DATA__ && typeof window.__PATROL_DATA__ === 'object')
     ? window.__PATROL_DATA__ : {};
   var __patrolTimer = null;
 
-  // 兜底：如果初始化时 window.__PATROL_DATA__ 为空，尝试从磁盘读入补充
-  if (Object.keys(__patrolStore).length === 0) {
-    setTimeout(function () {
-      invoke('read_app_file', { name: 'localStorage.json' }).then(function (raw) {
-        if (!raw) return;
-        try {
-          var parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') {
-            for (var pk in parsed) {
-              if (!Object.prototype.hasOwnProperty.call(__patrolStore, pk)) {
-                __patrolStore[pk] = parsed[pk];
-              }
+  // 1. 如果原生 webview localStorage 中有旧数据，迁移进 __patrolStore（防止老版本数据丢失）
+  if (__nativeStorage && typeof __nativeStorage.getItem === 'function') {
+    try {
+      for (var ni = 0; ni < __nativeStorage.length; ni++) {
+        var nk = __nativeStorage.key(ni);
+        if (nk && !Object.prototype.hasOwnProperty.call(__patrolStore, nk)) {
+          var nv = __nativeStorage.getItem(nk);
+          if (nv !== null) __patrolStore[nk] = nv;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 2. 兜底异步从磁盘读取 localStorage.json 补充
+  if (invoke) {
+    invoke('read_app_file', { name: 'localStorage.json' }).then(function (raw) {
+      if (!raw) return;
+      try {
+        var parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          var hasNew = false;
+          for (var pk in parsed) {
+            if (!Object.prototype.hasOwnProperty.call(__patrolStore, pk)) {
+              __patrolStore[pk] = parsed[pk];
+              hasNew = true;
             }
           }
-        } catch (e) {}
-      }).catch(function () {});
-    }, 0);
+          if (hasNew) {
+            // 如果补充读到了新的已看记录，及时更新内存并刷新界面
+            if (typeof loadViewedPhotos === 'function') {
+              loadViewedPhotos();
+              if (typeof refreshTreeStats === 'function') refreshTreeStats();
+            }
+          }
+        }
+      } catch (e) {}
+    }).catch(function () {});
   }
 
   function persistStore(immediate) {
@@ -527,7 +550,16 @@
   Object.defineProperty(SimpleStorage.prototype, 'length', {
     get: function () { return Object.keys(__patrolStore).length; }
   });
-  window.localStorage = new SimpleStorage();
+
+  try {
+    Object.defineProperty(window, 'localStorage', {
+      value: new SimpleStorage(),
+      configurable: true,
+      writable: true
+    });
+  } catch (e) {
+    try { window.localStorage = new SimpleStorage(); } catch (e2) {}
+  }
 
   // 页面卸载或退到后台时强制即刻落盘
   window.addEventListener('beforeunload', function () { persistStore(true); });

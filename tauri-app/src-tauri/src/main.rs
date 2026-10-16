@@ -197,13 +197,35 @@ fn is_dir(path: String) -> bool {
 
 
 // ---------- 安装目录数据持久化 ----------
-// 数据文件统一放在 <exe 目录>/data；目录不可写时回退到 %LOCALAPPDATA%\PatrolDefect\data。
+// 数据文件统一放在 %LOCALAPPDATA%\PatrolDefect\data（稳定且不受更新/移动 exe 影响）；
+// 同时支持同级目录的 <exe 目录>/data 便携模式。
 fn data_dir() -> Result<PathBuf, String> {
     static DIR: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
     if let Some(dir) = DIR.get() {
         return dir.clone();
     }
     let resolved: Result<PathBuf, String> = (|| {
+        // 1. 如果程序同级目录下明确存在可写的 data 文件夹（如便携式 U 盘版），优先使用
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                let portable_candidate = parent.join("data");
+                if portable_candidate.is_dir() {
+                    let probe = portable_candidate.join(".writable");
+                    if std::fs::write(&probe, b"1").is_ok() {
+                        let _ = std::fs::remove_file(&probe);
+                        return Ok(portable_candidate);
+                    }
+                }
+            }
+        }
+        // 2. 默认统一使用 %LOCALAPPDATA%\PatrolDefect\data，保证多版本升级/更换路径时不丢失数据
+        let base = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        if !base.is_empty() {
+            let candidate = PathBuf::from(base).join("PatrolDefect").join("data");
+            std::fs::create_dir_all(&candidate).map_err(|e| e.to_string())?;
+            return Ok(candidate);
+        }
+        // 3. 回退为 exe 同级目录
         let exe_dir = std::env::current_exe()
             .map_err(|e| e.to_string())?
             .parent()
@@ -211,20 +233,10 @@ fn data_dir() -> Result<PathBuf, String> {
             .to_path_buf();
         let candidate = exe_dir.join("data");
         std::fs::create_dir_all(&candidate).map_err(|e| e.to_string())?;
-        let probe = candidate.join(".writable");
-        std::fs::write(&probe, b"1").map_err(|e| e.to_string())?;
-        let _ = std::fs::remove_file(&probe);
         Ok(candidate)
     })();
-    let fallback = || -> Result<PathBuf, String> {
-        let base = std::env::var("LOCALAPPDATA").unwrap_or_default();
-        let candidate = PathBuf::from(base).join("PatrolDefect").join("data");
-        std::fs::create_dir_all(&candidate).map_err(|e| e.to_string())?;
-        Ok(candidate)
-    };
-    let dir = resolved.or_else(|_| fallback());
-    let _ = DIR.set(dir.clone());
-    dir
+    let _ = DIR.set(resolved.clone());
+    resolved
 }
 
 fn safe_name(name: &str) -> Result<String, String> {
@@ -246,8 +258,26 @@ fn app_data_dir() -> Result<String, String> {
 #[tauri::command]
 fn read_app_file(name: String) -> Option<String> {
     let name = safe_name(&name).ok()?;
-    let dir = data_dir().ok()?;
-    std::fs::read_to_string(dir.join(name)).ok()
+    let primary_dir = data_dir().ok()?;
+    let primary_file = primary_dir.join(&name);
+    if let Ok(content) = std::fs::read_to_string(&primary_file) {
+        if !content.trim().is_empty() {
+            return Some(content);
+        }
+    }
+    // 兜底：如果主目录无内容，检查 exe 同级的 data 目录（跨版本数据平滑迁移）
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let alt_file = parent.join("data").join(&name);
+            if let Ok(content) = std::fs::read_to_string(&alt_file) {
+                if !content.trim().is_empty() {
+                    let _ = std::fs::write(&primary_file, &content);
+                    return Some(content);
+                }
+            }
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -256,14 +286,21 @@ fn write_app_file(name: String, content: String) -> Result<String, String> {
     let dir = data_dir()?;
     let target = dir.join(&name);
     write_atomic(&target, content.as_bytes())?;
+    // 如果 exe 同级存在可写的 data 目录，同时镜像写入一份，保障便携模式同步
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let alt_dir = parent.join("data");
+            if alt_dir.is_dir() && alt_dir != dir {
+                let alt_target = alt_dir.join(&name);
+                let _ = write_atomic(&alt_target, content.as_bytes());
+            }
+        }
+    }
     Ok(target.to_string_lossy().to_string())
 }
 
 fn main() {
-    let stored_state = data_dir()
-        .ok()
-        .and_then(|dir| std::fs::read_to_string(dir.join("localStorage.json")).ok())
-        .unwrap_or_default();
+    let stored_state = read_app_file("localStorage.json".to_string()).unwrap_or_default();
     let init_state = if stored_state.trim().is_empty() {
         "window.__PATROL_DATA__ = {};".to_string()
     } else {

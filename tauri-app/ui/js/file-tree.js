@@ -220,6 +220,7 @@
     state.markedBoxedHandles = new Map();
     state.markedDefectTags = new Map();
     state.markedCounts = new Map();
+    loadViewedPhotos();
     var lastV = -1;
     for (var i = 0; i < entries.length; i++) {
       var eKey = fileKey(entries[i]);

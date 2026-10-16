@@ -272,6 +272,7 @@
       saveViewedTimer = null;
       try {
         localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap));
+        if (typeof localStorage.flush === "function") localStorage.flush();
       } catch (e) {
         console.warn("saveViewedPhotos error:", e);
       }
@@ -305,9 +306,21 @@
       var raw = localStorage.getItem(KEY_VIEWED);
       if (raw) {
         var obj = JSON.parse(raw);
-        if (obj && typeof obj === 'object') viewedPhotosMap = obj;
+        if (obj && typeof obj === 'object') {
+          for (var k in obj) {
+            if (obj[k]) viewedPhotosMap[k] = true;
+          }
+        }
       }
-    } catch (e) {}
+      // 如果已有已标照片，自动并入已看集合
+      if (typeof state !== 'undefined' && state && state.markedFiles) {
+        state.markedFiles.forEach(function (mk) {
+          if (mk) viewedPhotosMap[mk] = true;
+        });
+      }
+    } catch (e) {
+      console.warn("loadViewedPhotos error:", e);
+    }
   }
 
   function saveAutoCategories() {

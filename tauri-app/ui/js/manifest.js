@@ -1,4 +1,4 @@
-﻿// 输出清单管理、多线路独立清单持久化与已标状态统计
+// 输出清单管理、多线路独立清单持久化与已标状态统计
 
 
   /* ================= 输出目录扫描（获取已标记照片信息） ================= */
@@ -172,6 +172,15 @@
     } catch (e) {
       console.warn('写入输出清单失败:', e);
     }
+    // 同步将已看记录备份写入输出目录中的 .巡检已看记录.json（方便跨设备拷贝工程目录保留已看进度）
+    try {
+      if (typeof viewedPhotosMap !== 'undefined' && viewedPhotosMap && Object.keys(viewedPhotosMap).length > 0) {
+        var vfh = await output.mainHandle.getFileHandle('.巡检已看记录.json', { create: true });
+        var vw = await vfh.createWritable();
+        await vw.write(JSON.stringify(viewedPhotosMap));
+        await vw.close();
+      }
+    } catch (e) {}
   }
 
   function manifestSet(outRelPath, origName, relPath, line) {
@@ -514,6 +523,45 @@
       state.markedDefectTags = markedDefectTags;
       state.markedCounts = markedCounts;
       state.criticalFiles = await scanCriticalDirectory();
+
+      // 1. 尝试从输出目录读取备份的 .巡检已看记录.json
+      var anyNewViewed = false;
+      try {
+        var vfhRead = await output.mainHandle.getFileHandle('.巡检已看记录.json', { create: false });
+        var vfFile = await vfhRead.getFile();
+        var vfText = await vfFile.text();
+        if (vfText) {
+          var vfObj = JSON.parse(vfText);
+          if (vfObj && typeof vfObj === 'object') {
+            for (var vk in vfObj) {
+              if (vfObj[vk] && !viewedPhotosMap[vk]) {
+                viewedPhotosMap[vk] = true;
+                anyNewViewed = true;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 2. 缺陷照片必然已经查看过，自动将已标缺陷图片登记到已看集合
+      markedFiles.forEach(function (mk) {
+        if (!viewedPhotosMap[mk]) {
+          viewedPhotosMap[mk] = true;
+          anyNewViewed = true;
+        }
+      });
+      if (state.files) {
+        for (var mfi = 0; mfi < state.files.length; mfi++) {
+          var msf = state.files[mfi];
+          if (isFileViewed(msf)) {
+            if (markFileViewed(msf)) anyNewViewed = true;
+          }
+        }
+      }
+      if (anyNewViewed && typeof saveViewedPhotos === 'function') {
+        saveViewedPhotos(true);
+      }
+
       invalidateFilterList();
       renderPathTree(false);
       updateHud();
