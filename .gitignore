@@ -1,5 +1,30 @@
-**/bin/
-**/obj/
-artifacts/
-.vs/
-TestResults/
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Rust / Cargo
+target/
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+Cargo.lock
+
+# Tauri build artifacts
+tauri-app/src-tauri/target/
+tauri-app/src-tauri/gen/
+dist/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local app data & crash logs
+crash.log
+session.json
+*.tmp
