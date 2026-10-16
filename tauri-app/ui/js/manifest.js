@@ -1,4 +1,4 @@
-// 输出清单管理、多线路独立清单持久化与已标状态统计
+﻿// 输出清单管理、多线路独立清单持久化与已标状态统计
 
 
   /* ================= 输出目录扫描（获取已标记照片信息） ================= */
@@ -66,11 +66,37 @@
     } else if (outName) {
       desc = outName;
     }
-    // 全绝缘缺陷为缺陷描述后缀名带有“绝缘”的缺陷，以及明确规定的“裸导线”缺陷；其余均为其他缺陷
-    if (desc && (desc.indexOf('绝缘') >= 0 || desc.indexOf('裸导线') >= 0)) {
-      return '全绝缘缺陷';
+
+    var rules = (autoCategoryRules && Object.keys(autoCategoryRules).length > 0)
+      ? autoCategoryRules
+      : DEFAULT_AUTO_CATEGORIES;
+
+    if (!desc) {
+      if (rules['其他缺陷'] !== undefined) return '其他缺陷';
+      var allK = Object.keys(rules);
+      return allK.length > 0 ? allK[allK.length - 1] : '其他缺陷';
     }
-    return '其他缺陷';
+
+    // 优先按包含具体匹配标签的规则匹配
+    for (var cat in rules) {
+      var tags = rules[cat];
+      if (Array.isArray(tags) && tags.length > 0) {
+        for (var i = 0; i < tags.length; i++) {
+          var t = (tags[i] || '').trim();
+          if (t && desc.indexOf(t) >= 0) {
+            return cat;
+          }
+        }
+      }
+    }
+
+    // 未命中任何具体标签时，归入兜底分类（若存在“其他缺陷”则归入，或首个标签为空的分类）
+    if (rules['其他缺陷'] !== undefined) return '其他缺陷';
+    for (var c in rules) {
+      if (Array.isArray(rules[c]) && rules[c].length === 0) return c;
+    }
+    var keys = Object.keys(rules);
+    return keys.length > 0 ? keys[keys.length - 1] : '其他缺陷';
   }
 
   function getDefectTagsForFile(keyOrFile) {

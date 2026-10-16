@@ -1,4 +1,4 @@
-// 常量、存储键、IndexedDB 目录句柄与矢量 SVG 图标库
+﻿// 常量、存储键、IndexedDB 目录句柄与矢量 SVG 图标库
 
 
   var $ = function (id) { return document.getElementById(id); };
@@ -9,7 +9,7 @@
   var IMG_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'];
   var strokeWidth = 10;
   var MIN_ZOOM = 0.1, MAX_ZOOM = 10, HANDLE_PX = 8;
-  var CACHE_LIMIT = 4;
+  var CACHE_LIMIT = 10;
 
   var KEY_THEME = 'xunjian_theme';
   var KEY_NO_PROMPT = 'xunjian_no_prompt';
@@ -24,6 +24,11 @@
   var KEY_VIEWED = 'xunjian_viewed_photos_v2';
   var KEY_CANDIDATE_POOL = 'xunjian_candidate_pool_v7';
   var KEY_CRITICAL_DEFECTS = 'xunjian_critical_defects_v1';
+  var KEY_AUTO_CATEGORIES = 'xunjian_auto_categories_v1';
+  var DEFAULT_AUTO_CATEGORIES = {
+    '全绝缘缺陷': ['绝缘', '裸导线'],
+    '其他缺陷': []
+  };
 
   // 目录句柄持久化 (IndexedDB)
   var DB_NAME = 'xunjian_dirs_storage_v1';
@@ -411,13 +416,21 @@
   /* ================= 极简矢量图标 (SVG Icons) ================= */
   var ICONS = {
     // 关联推荐 (链接)
-    link: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>',
+    link: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;vertical-align:middle"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>',
     // 编辑/重命名 (铅笔)
-    edit: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>',
+    edit: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;vertical-align:middle"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>',
     // 添加 (加号)
-    plus: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>',
+    plus: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;vertical-align:middle"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>',
     // 删除 (垃圾桶)
-    trash: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>',
+    trash: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;vertical-align:middle"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>',
     // 移除/关闭 (叉号)
-    close: '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
+    close: '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;vertical-align:middle"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
+    // 警告/危急 (三角形感叹号)
+    warning: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;vertical-align:middle"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+    // 对勾/成功 (Check)
+    check: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;vertical-align:middle"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+    // 折叠展开指示箭头 (Chevron down)
+    chevronDown: '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;vertical-align:middle"><polyline points="6 9 12 15 18 9"></polyline></svg>',
+    // 指向箭头 (Play arrow)
+    arrowRight: '<svg viewBox="0 0 24 24" width="8" height="8" fill="currentColor" stroke="none" style="pointer-events:none;vertical-align:middle"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>'
   };

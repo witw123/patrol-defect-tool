@@ -21,7 +21,8 @@
         defectDict: defectDict,
         locationAdjacency: locationAdjacency,
         candidatePool: candidatePool,
-        criticalDefects: Array.from(criticalDefects)
+        criticalDefects: Array.from(criticalDefects),
+        autoCategoryRules: autoCategoryRules
       };
 
       var jsonStr = JSON.stringify(template, null, 2);
@@ -70,7 +71,8 @@
           defectDict: data.defectDict || {},
           locationAdjacency: data.locationAdjacency || {},
           candidatePool: Array.isArray(data.candidatePool) ? data.candidatePool : null,
-          criticalDefects: Array.isArray(data.criticalDefects) ? data.criticalDefects : null
+          criticalDefects: Array.isArray(data.criticalDefects) ? data.criticalDefects : null,
+          autoCategoryRules: (data.autoCategoryRules && typeof data.autoCategoryRules === 'object') ? data.autoCategoryRules : null
         };
 
         var catNum = Object.keys(pendingImportData.defectDict).length;
@@ -127,12 +129,28 @@
     }
     saveDefectDict();
     saveCriticalDefects();
+      if (pendingImportData.autoCategoryRules) {
+        for (var ac in pendingImportData.autoCategoryRules) {
+          if (!autoCategoryRules[ac]) {
+            autoCategoryRules[ac] = pendingImportData.autoCategoryRules[ac];
+          } else {
+            var exTags = autoCategoryRules[ac];
+            var imTags = pendingImportData.autoCategoryRules[ac];
+            for (var ii = 0; ii < imTags.length; ii++) {
+              if (exTags.indexOf(imTags[ii]) < 0) exTags.push(imTags[ii]);
+            }
+          }
+        }
+        saveAutoCategories();
+      }
+
     saveAdjacency();
     closeImportModal();
     renderSide();
     if (recommendModal.classList.contains('show')) {
       renderCurrentRecPosDetails();
       renderModalCategoryList();
+      renderModalAutoCategoryList();
     }
     toast('✓ 已成功按模板完全覆盖分类、推荐规则与候选词池！');
   });
@@ -191,6 +209,22 @@
       newPool = addCandidatePoolItem(pendingImportData.candidatePool);
     }
 
+    if (pendingImportData.autoCategoryRules) {
+      if (!autoCategoryRules) autoCategoryRules = {};
+      for (var ac in pendingImportData.autoCategoryRules) {
+        if (!autoCategoryRules[ac]) {
+          autoCategoryRules[ac] = pendingImportData.autoCategoryRules[ac].slice();
+        } else {
+          var exTags = autoCategoryRules[ac];
+          var imTags = pendingImportData.autoCategoryRules[ac];
+          for (var ii = 0; ii < imTags.length; ii++) {
+            if (exTags.indexOf(imTags[ii]) < 0) exTags.push(imTags[ii]);
+          }
+        }
+      }
+      saveAutoCategories();
+    }
+
     saveDefectDict();
     saveCriticalDefects();
     saveAdjacency();
@@ -199,6 +233,7 @@
     if (recommendModal.classList.contains('show')) {
       renderCurrentRecPosDetails();
       renderModalCategoryList();
+      renderModalAutoCategoryList();
     }
     toast('✓ 智能合并完成：新增 ' + newCats + ' 个分类，补充 ' + newTags + ' 个标签与 ' + newRules + ' 条推荐规则！');
   });
@@ -214,19 +249,23 @@
   /* ================= 二级配置界面（目标部件增删改、关联分类增删改、分类列表增删改、候选词池增删改） ================= */
 
   var curEditingRecPos = '';
-  var activeModalTab = 'rec'; // 'rec' | 'cat'
+  var activeModalTab = 'rec'; // 'rec' | 'cat' | 'autocat'
 
   function setModalTab(tab) {
     activeModalTab = tab;
     tabModalRec.classList.toggle('active', tab === 'rec');
     tabModalCat.classList.toggle('active', tab === 'cat');
+    if (tabModalAutoCat) tabModalAutoCat.classList.toggle('active', tab === 'autocat');
     modalViewRec.style.display = tab === 'rec' ? 'flex' : 'none';
     modalViewCat.style.display = tab === 'cat' ? 'flex' : 'none';
+    if (modalViewAutoCat) modalViewAutoCat.style.display = tab === 'autocat' ? 'flex' : 'none';
     if (tab === 'cat') renderModalCategoryList();
+    if (tab === 'autocat') renderModalAutoCategoryList();
   }
 
   tabModalRec.addEventListener('click', function () { setModalTab('rec'); });
   tabModalCat.addEventListener('click', function () { setModalTab('cat'); });
+  if (tabModalAutoCat) tabModalAutoCat.addEventListener('click', function () { setModalTab('autocat'); });
 
   function openRecommendModal(targetPos, preferredTab) {
     var allPositions = new Set();
@@ -298,7 +337,7 @@
         candidateHtml += '  <span class="pill-action del" data-candidate="' + esc(candidate) + '" title="从候选池彻底删除">' + ICONS.close + '</span>';
         candidateHtml += '</span>';
       } else {
-        candidateHtml += '<span class="candidate-pill' + (isAdded ? ' active' : '') + '" data-cat="' + esc(pos) + '" data-candidate="' + esc(candidate) + '" title="' + (isAdded ? '已关联（点击可直接移除）' : '点击直接关联推荐') + '">' + (isAdded ? '✓ ' : '+ ') + esc(candidate) + '</span>';
+        candidateHtml += '<span class="candidate-pill' + (isAdded ? ' active' : '') + '" data-cat="' + esc(pos) + '" data-candidate="' + esc(candidate) + '" title="' + (isAdded ? '已关联（点击可直接移除）' : '点击直接关联推荐') + '">' + (isAdded ? (ICONS.check + ' ') : (ICONS.plus + ' ')) + esc(candidate) + '</span>';
       }
     }
 
@@ -569,6 +608,15 @@
   });
 
   btnResetRecDefault.addEventListener('click', function () {
+    if (activeModalTab === 'autocat') {
+      showConfirmDialog('重置分类库', '确定要恢复默认自动保存分类库吗？\n恢复后将重置为「全绝缘缺陷」与「其他缺陷」默认规则。').then(function (ok) {
+        if (!ok) return;
+        resetAutoCategories();
+        renderModalAutoCategoryList();
+        toast('✓ 已恢复默认自动保存分类库');
+      });
+      return;
+    }
     showConfirmDialog('恢复默认推荐图谱', '确定要恢复系统默认的相近关联推荐图谱吗？自定义推荐规则将被重置。').then(function (ok) {
       if (!ok) return;
       locationAdjacency = JSON.parse(JSON.stringify(DEFAULT_LOCATION_ADJACENCY));
@@ -816,3 +864,249 @@
   recommendModal.addEventListener('click', function (e) {
     if (e.target === recommendModal) closeRecommendModal();
   });
+
+
+  /* ================= 自动保存分类库增删改 UI 实现 ================= */
+
+  function renderModalAutoCategoryList() {
+    if (!modalAutoCatListScroll) return;
+    var filterQ = (modalAutoCatSearchInput && modalAutoCatSearchInput.value || '').trim().toLowerCase();
+    var rules = autoCategoryRules || DEFAULT_AUTO_CATEGORIES;
+    var cats = Object.keys(rules);
+
+    var html = '';
+    var matchCount = 0;
+
+    for (var i = 0; i < cats.length; i++) {
+      var cat = cats[i];
+      var tags = rules[cat] || [];
+
+      if (filterQ) {
+        var matchCat = cat.toLowerCase().indexOf(filterQ) >= 0;
+        var matchTag = tags.some(function (t) { return (t || '').toLowerCase().indexOf(filterQ) >= 0; });
+        if (!matchCat && !matchTag) continue;
+      }
+
+      var isDefault = (tags.length === 0);
+      var tagCountDesc = isDefault ? '兜底分类 · 未命中其它分类时自动保存至此' : (tags.length + ' 项匹配标签');
+
+      html += '<div class="cat-card-modal" data-autocat="' + esc(cat) + '">';
+      html += '  <div class="cat-card-modal-head">';
+      html += '    <span><b>【' + esc(cat) + '】</b> <span style="font-size:11px;color:var(--muted);font-weight:normal">(' + tagCountDesc + ')</span></span>';
+      html += '    <div style="display:flex;align-items:center;gap:4px">';
+      html += '      <button class="mini-tool-btn modal-add-autotag-btn" data-autocat="' + esc(cat) + '" title="为该分类添加匹配关键词标签">加标签</button>';
+      html += '      <button class="mini-tool-btn modal-edit-autocat-btn" data-autocat="' + esc(cat) + '" title="重命名该分类名称">重命名</button>';
+      if (cats.length > 1) {
+        html += '      <button class="mini-tool-btn modal-del-autocat-btn" data-autocat="' + esc(cat) + '" style="color:var(--accent)" title="删除该分类">删除</button>';
+      }
+      html += '    </div>';
+      html += '  </div>';
+
+      html += '  <div class="cat-card-modal-body">';
+      if (tags.length > 0) {
+        for (var ti = 0; ti < tags.length; ti++) {
+          var tag = tags[ti];
+          html += '<span class="modal-def-tag" data-autocat="' + esc(cat) + '" data-autotag="' + esc(tag) + '">';
+          html += '  <span>' + esc(tag) + '</span>';
+          html += '  <span class="tag-btn-icon modal-edit-autotag" data-autocat="' + esc(cat) + '" data-autotag="' + esc(tag) + '" title="修改此匹配标签">' + ICONS.edit + '</span>';
+          html += '  <span class="tag-btn-icon modal-del-autotag" data-autocat="' + esc(cat) + '" data-autotag="' + esc(tag) + '" title="删除此匹配标签">' + ICONS.close + '</span>';
+          html += '</span>';
+        }
+      } else {
+        html += '<span style="font-size:11px;color:var(--muted)">暂无特定匹配标签（作为默认兜底输出目录；点击右上角「加标签」可添加匹配规则）</span>';
+      }
+      html += '  </div>';
+      html += '</div>';
+      matchCount++;
+    }
+
+    if (matchCount === 0) {
+      html = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:24px 0">未找到符合搜索条件的自动保存分类</div>';
+    }
+
+    modalAutoCatListScroll.innerHTML = html;
+  }
+
+
+  if (btnOpenAutoCatSettings) {
+    btnOpenAutoCatSettings.addEventListener('click', function () {
+      openRecommendModal('', 'autocat');
+    });
+  }
+
+  if (modalAutoCatSearchInput) {
+    modalAutoCatSearchInput.addEventListener('input', renderModalAutoCategoryList);
+  }
+
+  // 新建自动保存分类
+  if (btnModalCreateAutoCat) {
+    btnModalCreateAutoCat.addEventListener('click', function () {
+      showPromptDialog({
+        title: '新建自动保存分类',
+        desc: '新建保存子目录分类名称（如：全绝缘缺陷、其他缺陷、通道缺陷、金具缺陷等）：',
+        placeholder: '输入分类名称…',
+        validate: function (v) {
+          if (!v || !v.trim()) return '分类名称不能为空';
+          var name = v.trim();
+          if (autoCategoryRules && autoCategoryRules[name] !== undefined) return '已存在同名分类';
+          var invalidPattern = new RegExp('[/\\:*?"<>|]');
+          if (invalidPattern.test(name)) return '分类名称不能包含 \ / : * ? " < > | 字符';
+          return null;
+        }
+      }).then(function (newCat) {
+        if (newCat && newCat.trim()) {
+          newCat = newCat.trim();
+          if (!autoCategoryRules) autoCategoryRules = {};
+          autoCategoryRules[newCat] = [];
+          saveAutoCategories();
+          renderModalAutoCategoryList();
+          toast('✓ 已新建自动保存分类：【' + newCat + '】');
+        }
+      });
+    });
+  }
+
+  // 恢复默认分类库
+  if (btnResetAutoCatDefault) {
+    btnResetAutoCatDefault.addEventListener('click', function () {
+      showConfirmDialog('重置分类库', '确定要恢复默认自动保存分类库吗？\n恢复后将重置为「全绝缘缺陷」与「其他缺陷」默认规则。').then(function (ok) {
+        if (!ok) return;
+        resetAutoCategories();
+        renderModalAutoCategoryList();
+        toast('✓ 已恢复默认自动保存分类库');
+      });
+    });
+  }
+
+  // 分类卡片内的标签增、改、删与分类重命名、删除（事件委托）
+  if (modalAutoCatListScroll) {
+    modalAutoCatListScroll.addEventListener('click', function (e) {
+      // 1. 添加标签
+      var addTagBtn = e.target.closest('.modal-add-autotag-btn');
+      if (addTagBtn) {
+        var cat = addTagBtn.dataset.autocat;
+        showPromptDialog({
+          title: '添加分类匹配标签',
+          desc: '在【' + cat + '】下添加触发此分类的缺陷描述关键词（支持输入多个，用逗号或空格隔开）：',
+          placeholder: '如：绝缘、裸导线、接地…',
+          validate: function (v) {
+            if (!v || !v.trim()) return '标签关键词不能为空';
+            return null;
+          }
+        }).then(function (tagText) {
+          if (tagText && tagText.trim()) {
+            var rawList = tagText.trim().split(/[,，\s]+/);
+            if (!autoCategoryRules[cat]) autoCategoryRules[cat] = [];
+            var addedCount = 0;
+            for (var ri = 0; ri < rawList.length; ri++) {
+              var item = rawList[ri].trim();
+              if (item && autoCategoryRules[cat].indexOf(item) < 0) {
+                autoCategoryRules[cat].push(item);
+                addedCount++;
+              }
+            }
+            if (addedCount > 0) {
+              saveAutoCategories();
+              renderModalAutoCategoryList();
+              toast('✓ 已为【' + cat + '】添加 ' + addedCount + ' 个匹配标签');
+            } else {
+              toast('所输入的标签已存在');
+            }
+          }
+        });
+        return;
+      }
+
+      // 2. 重命名分类
+      var editCatBtn = e.target.closest('.modal-edit-autocat-btn');
+      if (editCatBtn) {
+        var oldCat = editCatBtn.dataset.autocat;
+        showPromptDialog({
+          title: '重命名自动保存分类',
+          desc: '修改分类名称：',
+          defaultValue: oldCat,
+          validate: function (v) {
+            if (!v || !v.trim()) return '分类名称不能为空';
+            var name = v.trim();
+            if (name !== oldCat && autoCategoryRules && autoCategoryRules[name] !== undefined) return '已存在同名分类';
+            var invalidPattern = new RegExp('[/\\:*?"<>|]');
+            if (invalidPattern.test(name)) return '分类名称不能包含 \ / : * ? " < > | 字符';
+            return null;
+          }
+        }).then(function (newName) {
+          if (newName && newName.trim() && newName.trim() !== oldCat) {
+            newName = newName.trim();
+            var tags = autoCategoryRules[oldCat] || [];
+            delete autoCategoryRules[oldCat];
+            autoCategoryRules[newName] = tags;
+            saveAutoCategories();
+            renderModalAutoCategoryList();
+            toast('✓ 分类已重命名为：【' + newName + '】');
+          }
+        });
+        return;
+      }
+
+      // 3. 删除分类
+      var delCatBtn = e.target.closest('.modal-del-autocat-btn');
+      if (delCatBtn) {
+        var delCat = delCatBtn.dataset.autocat;
+        showConfirmDialog('删除分类', '确定要删除自动保存分类【' + delCat + '】及其所有匹配标签吗？').then(function (ok) {
+          if (!ok) return;
+          delete autoCategoryRules[delCat];
+          if (Object.keys(autoCategoryRules).length === 0) {
+            autoCategoryRules['其他缺陷'] = [];
+          }
+          saveAutoCategories();
+          renderModalAutoCategoryList();
+          toast('✓ 已删除分类：【' + delCat + '】');
+        });
+        return;
+      }
+
+      // 4. 编辑单个标签
+      var editTagBtn = e.target.closest('.modal-edit-autotag');
+      if (editTagBtn) {
+        var cat4 = editTagBtn.dataset.autocat;
+        var oldTag = editTagBtn.dataset.autotag;
+        showPromptDialog({
+          title: '修改匹配标签',
+          desc: '在【' + cat4 + '】下修改标签关键词：',
+          defaultValue: oldTag,
+          validate: function (v) {
+            if (!v || !v.trim()) return '标签关键词不能为空';
+            return null;
+          }
+        }).then(function (newTag) {
+          if (newTag && newTag.trim() && newTag.trim() !== oldTag) {
+            newTag = newTag.trim();
+            var list = autoCategoryRules[cat4] || [];
+            var tidx = list.indexOf(oldTag);
+            if (tidx >= 0) {
+              list[tidx] = newTag;
+              saveAutoCategories();
+              renderModalAutoCategoryList();
+              toast('✓ 已将标签修改为【' + newTag + '】');
+            }
+          }
+        });
+        return;
+      }
+
+      // 5. 删除单个标签
+      var delTagBtn = e.target.closest('.modal-del-autotag');
+      if (delTagBtn) {
+        var cat5 = delTagBtn.dataset.autocat;
+        var targetTag = delTagBtn.dataset.autotag;
+        var list5 = autoCategoryRules[cat5] || [];
+        var tidx5 = list5.indexOf(targetTag);
+        if (tidx5 >= 0) {
+          list5.splice(tidx5, 1);
+          saveAutoCategories();
+          renderModalAutoCategoryList();
+          toast('✓ 已从【' + cat5 + '】中移除标签【' + targetTag + '】');
+        }
+        return;
+      }
+    });
+  }

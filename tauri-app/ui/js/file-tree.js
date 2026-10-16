@@ -189,6 +189,7 @@
       }
       state.discoveredDirs = Array.from(dirSet);
     }
+    state.leafDirs = computeLeafDirs(state.discoveredDirs);
 
     // 必须在排序前清空缓存，保证 comparePhotos 使用最新的 rootLineName 和解析结果
     parsedFileCache.clear();
@@ -219,13 +220,16 @@
     state.markedBoxedHandles = new Map();
     state.markedDefectTags = new Map();
     state.markedCounts = new Map();
+    var lastV = -1;
     for (var i = 0; i < entries.length; i++) {
       var eKey = fileKey(entries[i]);
       state.byKey.set(eKey, entries[i]);
       state.byName.set(entries[i].name, entries[i]);
       state.indexByKey.set(eKey, i);
       state.indexByName.set(entries[i].name, i);
+      if (isFileViewed(entries[i])) lastV = i;
     }
+    state.lastViewedIndex = lastV;
     buildInputNameIndex();
     state.index = -1;
     empty.style.display = 'none';
@@ -275,6 +279,21 @@
   }
 
 
+  function computeLeafDirs(dirs) {
+    if (!dirs || dirs.length === 0) return [];
+    var sorted = dirs.slice().sort();
+    var leaves = [];
+    for (var i = 0; i < sorted.length; i++) {
+      var cur = sorted[i];
+      var next = sorted[i + 1];
+      if (next && (next.startsWith(cur + '/') || next.startsWith(cur + '\\'))) {
+        continue;
+      }
+      leaves.push(cur);
+    }
+    return leaves;
+  }
+
   /* ---- 全局与杆塔/线路精确统计瞬时刷新（耗时 < 2ms，不重建 DOM，不扰动滚动条） ---- */
 
   function refreshTreeStats() {
@@ -290,10 +309,7 @@
     var groupStats = new Map();
     var groupOrder = [];
 
-    var allScannedDirs = state.discoveredDirs || [];
-    var leafDirs = allScannedDirs.filter(function (d) {
-      return !allScannedDirs.some(function (other) { return other !== d && other.startsWith(d); });
-    });
+    var leafDirs = state.leafDirs || (state.leafDirs = computeLeafDirs(state.discoveredDirs));
 
     for (var di = 0; di < leafDirs.length; di++) {
       var dInfo = parseDirToLineAndTower(leafDirs[di]);
@@ -527,6 +543,10 @@
       viewedTowerStr += ' (' + totalStartedTowers + '基已查)';
     }
     var defectSumTxt = (totalDefects > totalMarkedPhotos) ? (' (' + totalDefects + '处缺陷)') : '';
+    if (dirSummaryLineCount) {
+      dirSummaryLineCount.textContent = totalLines + ' 线路';
+      dirSummaryLineCount.style.display = totalLines > 0 ? 'inline-block' : 'none';
+    }
     if (dirSummaryText) {
       dirSummaryText.innerHTML = totalLines + ' 线路 · <span style="color:var(--accent);font-weight:600">已标 ' + totalMarkedPhotos + '/' + totalPhotos + defectSumTxt + '</span> · <span style="color:var(--ok);font-weight:600">已看 ' + viewedTowerStr + ' 杆塔</span>';
       dirSummaryText.title = '共 ' + totalLines + ' 条线路、' + totalTowers + ' 基杆塔、' + totalPhotos + ' 张照片；已标记 ' + totalMarkedPhotos + ' 张照片 (共 ' + totalDefects + ' 处缺陷输出)，已完整查看 ' + totalFullyViewedTowers + ' 基杆塔，累计查勘 ' + totalStartedTowers + ' 基杆塔';
@@ -534,8 +554,8 @@
 
     // 筛选按钮文字
     if (btnFilterAll) btnFilterAll.textContent = '全部 (' + totalPhotos + ')';
-    if (btnFilterMarked) btnFilterMarked.textContent = '已标记 (' + totalMarkedPhotos + ')';
-    if (btnFilterUnmarked) btnFilterUnmarked.textContent = '未标记 (' + (totalPhotos - totalMarkedPhotos) + ')';
+    if (btnFilterMarked) btnFilterMarked.textContent = '已标 (' + totalMarkedPhotos + ')';
+    if (btnFilterUnmarked) btnFilterUnmarked.textContent = '未标 (' + (totalPhotos - totalMarkedPhotos) + ')';
     if (btnFilterUnviewed) btnFilterUnviewed.textContent = '未看 (' + (totalPhotos - totalViewedPhotos) + ')';
   }
 
@@ -571,6 +591,10 @@
       viewedTowerStr += ' (' + s.totalStartedTowers + '基已查)';
     }
     var defectSumTxt = (s.totalDefects > s.totalMarkedPhotos) ? (' (' + s.totalDefects + '处缺陷)') : '';
+    if (dirSummaryLineCount) {
+      dirSummaryLineCount.textContent = s.totalLines + ' 线路';
+      dirSummaryLineCount.style.display = s.totalLines > 0 ? 'inline-block' : 'none';
+    }
     dirSummaryText.innerHTML = s.totalLines + ' 线路 · <span style="color:var(--accent);font-weight:600">已标 ' + s.totalMarkedPhotos + '/' + s.totalPhotos + defectSumTxt + '</span> · <span style="color:var(--ok);font-weight:600">已看 ' + viewedTowerStr + ' 杆塔</span>';
     if (btnFilterUnviewed) btnFilterUnviewed.textContent = '未看 (' + (s.totalPhotos - s.totalViewedPhotos) + ')';
   }
@@ -591,10 +615,12 @@
     updateTopSummaryText();
   }
 
+  var availableLines = [];
+
   /* ---- 左侧全量按线路/支线前缀分类、子文件夹杆塔统计、输出标记筛选与展开/折叠 ---- */
 
   function renderPathTree(shouldScrollToActive) {
-    sanitizeViewedPhotos();
+    // 已看记录实时持久化，不再误删
     if ((!state.files || state.files.length === 0) && (!state.discoveredDirs || state.discoveredDirs.length === 0)) {
       pathTree.innerHTML = '<div style="color:var(--muted);font-size:11.5px;padding:12px 0;text-align:center">未打开文件夹</div>';
       dirSummaryText.innerHTML = '';
@@ -614,10 +640,7 @@
     var curTower = curParsed ? curParsed.tower : '';
     var curTowerKey = curParsed ? (curPrefix + ':::' + curTower) : '';
 
-    var allScannedDirs = state.discoveredDirs || [];
-    var leafDirs = allScannedDirs.filter(function (d) {
-      return !allScannedDirs.some(function (other) { return other !== d && other.startsWith(d); });
-    });
+    var leafDirs = state.leafDirs || (state.leafDirs = computeLeafDirs(state.discoveredDirs));
 
     for (var di = 0; di < leafDirs.length; di++) {
       var dInfo = parseDirToLineAndTower(leafDirs[di]);
@@ -750,6 +773,15 @@
       });
     }
 
+    availableLines = groupOrder.map(function (pKey) {
+      var g = groupMap.get(pKey);
+      return {
+        prefix: pKey,
+        towerCount: g ? g.towerOrder.length : 0,
+        markedCount: g ? g.markedPhotos : 0
+      };
+    });
+
     // 默认全部收起，仅自动展开当前浏览所在的线路与杆塔
     for (var _gi = 0; _gi < groupOrder.length; _gi++) {
       var _pKey = groupOrder[_gi];
@@ -815,23 +847,32 @@
       viewedTowerStr += ' (' + totalStartedTowers + '基已查)';
     }
     var defectSumTxt = (totalDefects > totalMarkedPhotos) ? (' (' + totalDefects + '处缺陷)') : '';
+    if (dirSummaryLineCount) {
+      dirSummaryLineCount.textContent = totalLines + ' 线路';
+      dirSummaryLineCount.style.display = totalLines > 0 ? 'inline-block' : 'none';
+    }
     dirSummaryText.innerHTML = totalLines + ' 线路 · <span style="color:var(--accent);font-weight:600">已标 ' + totalMarkedPhotos + '/' + totalPhotos + defectSumTxt + '</span> · <span style="color:var(--ok);font-weight:600">已看 ' + viewedTowerStr + ' 杆塔</span>';
     dirSummaryText.title = '共 ' + totalLines + ' 条线路、' + totalTowers + ' 基杆塔、' + totalPhotos + ' 张照片；已标记 ' + totalMarkedPhotos + ' 张照片 (共 ' + totalDefects + ' 处缺陷输出)，已完整查看 ' + totalFullyViewedTowers + ' 基杆塔，累计查勘 ' + totalStartedTowers + ' 基杆塔';
 
     // 筛选按钮文字
     btnFilterAll.textContent = '全部 (' + totalPhotos + ')';
-    btnFilterMarked.textContent = '已标记 (' + totalMarkedPhotos + ')';
-    btnFilterUnmarked.textContent = '未标记 (' + (totalPhotos - totalMarkedPhotos) + ')';
+    btnFilterMarked.textContent = '已标 (' + totalMarkedPhotos + ')';
+    btnFilterUnmarked.textContent = '未标 (' + (totalPhotos - totalMarkedPhotos) + ')';
     btnFilterUnviewed.textContent = '未看 (' + (totalPhotos - totalViewedPhotos) + ')';
 
     var html = '';
     var renderedLines = 0;
+    var lineSearchKeyword = (lineSearchInput ? (lineSearchInput.value || '').trim().toLowerCase() : '');
 
     for (var i = 0; i < groupOrder.length; i++) {
       var pfxKey = groupOrder[i];
       var gData = groupMap.get(pfxKey);
       var isCurrentGroup = (pfxKey === curPrefix);
-      var isCollapsed = collapsedGroups.has(pfxKey);
+      // 线路名称搜索过滤
+      if (lineSearchKeyword && pfxKey.toLowerCase().indexOf(lineSearchKeyword) === -1) {
+        continue;
+      }
+      var isCollapsed = lineSearchKeyword ? false : collapsedGroups.has(pfxKey);
       var lineTowerCount = gData.towerOrder.length;
 
       // 线路过滤检查
@@ -890,7 +931,7 @@
           if (filterMode === 'unmarked' && item.isPhotoMarked) continue;
           if (filterMode === 'unviewed' && item.isViewed) continue;
 
-          var locIcon = item.isCurrent ? '<span class="loc-current-arrow" style="color:var(--accent);font-size:10px;margin-right:3px">▶</span>' : '';
+          var locIcon = item.isCurrent ? '<span class="loc-current-arrow" style="display:inline-flex;align-items:center;margin-right:3px;color:var(--accent)">' + ICONS.arrowRight + '</span>' : '';
           var itKey = item.key || item.name;
           var count = (state.markedCounts && state.markedCounts.get(itKey)) || 1;
           var markedBadge = item.isPhotoMarked ? ('<span class="item-marked-tag" title="已输出保存为缺陷图片' + (count > 1 ? ('（共 ' + count + ' 处缺陷）') : '') + '">' + markBadgeText(itKey) + '</span>') : '';
@@ -912,7 +953,7 @@
 
         towerHtml += '<div class="tower-group' + (isCurrentTower ? ' current-tower' : '') + (isTowerCollapsed ? ' collapsed' : '') + '" data-tower-key="' + esc(fullTwrKey) + '">';
         towerHtml += '  <div class="tower-header" data-tower-key="' + esc(fullTwrKey) + '" data-first-idx="' + tData.startIndex + '" title="点击展开/折叠（共 ' + tData.total + ' 张，已标记 ' + tData.markedPhotos + ' 张）">';
-        towerHtml += '    <span class="tower-title"><span class="toggle-arrow-mini">▼</span><span class="folder-name-text folder-tower-name" data-folder-type="tower" data-prefix="' + esc(pfxKey) + '" data-tower-name="' + esc(twrKey) + '" title="双击重命名此杆塔文件夹">【' + esc(twrKey) + '】</span></span>';
+        towerHtml += '    <span class="tower-title"><span class="toggle-arrow-mini">' + ICONS.chevronDown + '</span><span class="folder-name-text folder-tower-name" data-folder-type="tower" data-prefix="' + esc(pfxKey) + '" data-tower-name="' + esc(twrKey) + '" title="双击重命名此杆塔文件夹">【' + esc(twrKey) + '】</span></span>';
         towerHtml += '    <div class="tower-meta">';
         towerHtml += '      ' + towerMarkedBadge;
         towerHtml += '      <span>' + tData.total + '张</span>';
@@ -938,7 +979,7 @@
 
       html += '<div class="prefix-group' + (isCurrentGroup ? ' current-group' : '') + (isCollapsed ? ' collapsed' : '') + '" data-prefix="' + esc(pfxKey) + '">';
       html += '  <div class="prefix-header" data-prefix="' + esc(pfxKey) + '" data-first-idx="' + gData.startIndex + '" title="点击展开/折叠线路（共 ' + lineTowerCount + ' 基杆塔，已标记 ' + gData.markedPhotos + ' 张，已看 ' + gData.viewedTowers + ' 基）">';
-      html += '    <span class="prefix-title"><span class="toggle-arrow">▼</span><span class="folder-name-text folder-line-name" data-folder-type="line" data-line-name="' + esc(pfxKey) + '" title="双击重命名此线路文件夹">' + esc(pfxKey) + '</span></span>';
+      html += '    <span class="prefix-title"><span class="toggle-arrow">' + ICONS.chevronDown + '</span><span class="folder-name-text folder-line-name" data-folder-type="line" data-line-name="' + esc(pfxKey) + '" title="双击重命名此线路文件夹">' + esc(pfxKey) + '</span></span>';
       html += '    <div class="prefix-meta">';
       html += '      ' + lineMarkedBadge;
       html += '      ' + lineViewedBadge;
@@ -951,7 +992,8 @@
     }
 
     if (renderedLines === 0) {
-      var emptyMsg = filterMode === 'marked' ? '当前输出目录下暂未检测到已标记的缺陷图片' :
+      var emptyMsg = lineSearchKeyword ? ('未找到名称包含 “' + esc(lineSearchKeyword) + '” 的线路') :
+                     filterMode === 'marked' ? '当前输出目录下暂未检测到已标记的缺陷图片' :
                      (filterMode === 'unmarked' ? '所有照片均已标记' :
                      (filterMode === 'unviewed' ? '所有照片均已浏览查看' : '暂无符合条件的照片'));
       html = '<div style="color:var(--muted);font-size:11.5px;padding:24px 0;text-align:center">' + emptyMsg + '</div>';
@@ -1068,7 +1110,7 @@
       var arrowSpan = document.createElement('span');
       arrowSpan.className = 'loc-current-arrow';
       arrowSpan.style.cssText = 'color:var(--accent);font-size:10px;margin-right:3px';
-      arrowSpan.textContent = '▶';
+      arrowSpan.innerHTML = ICONS.arrowRight;
       locName.insertBefore(arrowSpan, locName.firstChild);
     }
 
@@ -1241,14 +1283,23 @@
       diskResult = { success: true, method: 'root_display_only' };
     }
 
-    // 同步更新所有文件的 relPath
+    // 同步更新所有文件的 relPath 与已看记录
+    var lineViewedChanged = false;
     for (var i = 0; i < state.files.length; i++) {
       var f = state.files[i];
       var rel = f.relPath || f.name;
       if (rel.startsWith(oldLineName + '/')) {
-        f.relPath = newLineName + '/' + rel.slice(oldLineName.length + 1);
+        var newRel = newLineName + '/' + rel.slice(oldLineName.length + 1);
+        f.relPath = newRel;
+        if (viewedPhotosMap[rel]) {
+          delete viewedPhotosMap[rel];
+          viewedPhotosMap[newRel] = true;
+          lineViewedChanged = true;
+        }
+        if (f.name) viewedPhotosMap[f.name] = true;
       }
     }
+    if (lineViewedChanged) saveViewedPhotos(true);
     manifestRewriteRelPathPrefix(oldLineName, newLineName);
     buildInputNameIndex();
 
@@ -1311,15 +1362,25 @@
       diskResult = await renameDirectoryOnDisk(dirInfo, oldTowerName, newTowerName);
     }
 
+    var towerViewedChanged = false;
     for (var i = 0; i < state.files.length; i++) {
       var f = state.files[i];
       var info = parseFilePrefixAndLocation(f.name, f.relPath);
       if (info.prefix === lineName && info.tower === oldTowerName) {
-        var fDir = dirOf(f.relPath || f.name);
+        var oldFPath = f.relPath || f.name;
+        var fDir = dirOf(oldFPath);
         var fParent = dirOf(fDir);
-        f.relPath = (fParent ? (fParent + '/') : '') + newTowerName + '/' + f.name;
+        var newFPath = (fParent ? (fParent + '/') : '') + newTowerName + '/' + f.name;
+        f.relPath = newFPath;
+        if (viewedPhotosMap[oldFPath]) {
+          delete viewedPhotosMap[oldFPath];
+          viewedPhotosMap[newFPath] = true;
+          towerViewedChanged = true;
+        }
+        if (f.name) viewedPhotosMap[f.name] = true;
       }
     }
+    if (towerViewedChanged) saveViewedPhotos(true);
     if (sampleOldDir) {
       manifestRewriteRelPathPrefix(sampleOldDir, (parentDir ? (parentDir + '/') : '') + newTowerName);
     }
@@ -1583,6 +1644,7 @@
       state.viewedPhotos.delete(oldFKey);
       state.viewedPhotos.add(newFKey);
     }
+    saveViewedPhotos(true);
 
     if (state.markedFiles && (state.markedFiles.has(oldFKey) || state.markedFiles.has(oldName))) {
       state.markedFiles.delete(oldFKey);
@@ -1648,9 +1710,7 @@
     if (state.index !== idx) {
       state.index = idx;
       var curPhoto = state.files[idx];
-      var pKey = fileKey(curPhoto);
-      if (pKey && !viewedPhotosMap[pKey]) {
-        viewedPhotosMap[pKey] = true;
+      if (markFileViewed(curPhoto)) {
         saveViewedPhotos();
       }
       updateHud();
@@ -1816,18 +1876,200 @@
     toast('左侧栏已重新自适应宽度');
   });
 
+  /* ================= 线路搜索联想与快速直达 ================= */
+
+  var dropdownActiveIndex = -1;
+
+  function highlightKeyword(text, keyword) {
+    if (!keyword) return esc(text);
+    var lowerText = text.toLowerCase();
+    var lowerKw = keyword.toLowerCase();
+    var idx = lowerText.indexOf(lowerKw);
+    if (idx < 0) return esc(text);
+    return esc(text.slice(0, idx)) + '<span class="search-match">' + esc(text.slice(idx, idx + keyword.length)) + '</span>' + esc(text.slice(idx + keyword.length));
+  }
+
+  function hideLineSearchDropdown() {
+    if (!lineSearchDropdown) return;
+    lineSearchDropdown.style.display = 'none';
+    lineSearchDropdown.innerHTML = '';
+    dropdownActiveIndex = -1;
+  }
+
+  function renderLineSearchDropdown(keyword) {
+    if (!lineSearchDropdown) return;
+    keyword = (keyword || '').trim().toLowerCase();
+    if (!keyword || !availableLines || availableLines.length === 0) {
+      hideLineSearchDropdown();
+      return;
+    }
+
+    var matches = availableLines.filter(function (item) {
+      return item.prefix.toLowerCase().indexOf(keyword) >= 0;
+    });
+
+    if (matches.length === 0) {
+      lineSearchDropdown.innerHTML = '<div style="padding:7px 10px;font-size:11px;color:var(--muted);text-align:center">未找到匹配线路</div>';
+      lineSearchDropdown.style.display = 'block';
+      dropdownActiveIndex = -1;
+      return;
+    }
+
+    dropdownActiveIndex = -1;
+    var html = '';
+    var maxCount = Math.min(matches.length, 12);
+    for (var i = 0; i < maxCount; i++) {
+      var item = matches[i];
+      var titleHtml = highlightKeyword(item.prefix, keyword);
+      var metaTxt = item.towerCount + ' 基杆塔' + (item.markedCount > 0 ? (' · 已标 ' + item.markedCount) : '');
+      html += '<div class="path-search-dropdown-item" data-prefix="' + esc(item.prefix) + '">';
+      html += '  <span class="item-title">' + titleHtml + '</span>';
+      html += '  <span class="item-meta">' + esc(metaTxt) + '</span>';
+      html += '</div>';
+    }
+    lineSearchDropdown.innerHTML = html;
+    lineSearchDropdown.style.display = 'block';
+  }
+
+  function selectLineFromDropdown(lineName) {
+    if (!lineName) return;
+    if (lineSearchInput) lineSearchInput.value = lineName;
+    if (lineSearchClear) lineSearchClear.style.display = 'inline-flex';
+    hideLineSearchDropdown();
+    renderPathTree(false);
+
+    setTimeout(function () {
+      var lineGroupEl = pathTree.querySelector('.prefix-group[data-prefix="' + CSS.escape(lineName) + '"]');
+      if (lineGroupEl) {
+        lineGroupEl.classList.remove('collapsed');
+        collapsedGroups.delete(lineName);
+        lineGroupEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+      var firstItem = (lineGroupEl || pathTree).querySelector('.loc-item');
+      if (firstItem && firstItem.dataset.idx !== undefined) {
+        var idx = parseInt(firstItem.dataset.idx, 10);
+        if (!isNaN(idx) && idx >= 0 && idx < state.files.length) {
+          switchTo(idx);
+        }
+      }
+    }, 40);
+  }
+
+  var lineSearchDebounceTimer = null;
+  if (lineSearchInput) {
+    lineSearchInput.addEventListener('input', function () {
+      var val = (this.value || '').trim();
+      if (lineSearchClear) {
+        lineSearchClear.style.display = val ? 'inline-flex' : 'none';
+      }
+      renderLineSearchDropdown(val);
+      if (lineSearchDebounceTimer) clearTimeout(lineSearchDebounceTimer);
+      lineSearchDebounceTimer = setTimeout(function () {
+        lineSearchDebounceTimer = null;
+        renderPathTree(false);
+      }, 100);
+    });
+    lineSearchInput.addEventListener('focus', function () {
+      var val = (this.value || '').trim();
+      if (val) renderLineSearchDropdown(val);
+    });
+    lineSearchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        if (lineSearchDropdown && lineSearchDropdown.style.display !== 'none') {
+          hideLineSearchDropdown();
+          return;
+        }
+        this.value = '';
+        if (lineSearchClear) lineSearchClear.style.display = 'none';
+        hideLineSearchDropdown();
+        renderPathTree(false);
+        return;
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (lineSearchDropdown && lineSearchDropdown.style.display !== 'none') {
+          e.preventDefault();
+          var items = lineSearchDropdown.querySelectorAll('.path-search-dropdown-item');
+          if (items.length > 0) {
+            if (e.key === 'ArrowDown') {
+              dropdownActiveIndex = (dropdownActiveIndex + 1) % items.length;
+            } else {
+              dropdownActiveIndex = (dropdownActiveIndex - 1 + items.length) % items.length;
+            }
+            for (var i = 0; i < items.length; i++) {
+              items[i].classList.toggle('active', i === dropdownActiveIndex);
+            }
+            if (items[dropdownActiveIndex]) {
+              items[dropdownActiveIndex].scrollIntoView({ block: 'nearest' });
+            }
+          }
+          return;
+        }
+
+
+
+      } else if (e.key === 'Enter') {
+        if (lineSearchDropdown && lineSearchDropdown.style.display !== 'none') {
+          var items2 = lineSearchDropdown.querySelectorAll('.path-search-dropdown-item');
+          if (items2.length > 0) {
+            var targetItem = (dropdownActiveIndex >= 0 && items2[dropdownActiveIndex]) ? items2[dropdownActiveIndex] : items2[0];
+            if (targetItem && targetItem.dataset.prefix) {
+              e.preventDefault();
+              selectLineFromDropdown(targetItem.dataset.prefix);
+              return;
+            }
+          }
+        }
+        var firstItem = pathTree.querySelector('.loc-item');
+        if (firstItem && firstItem.dataset.idx !== undefined) {
+          var idx = parseInt(firstItem.dataset.idx, 10);
+          if (!isNaN(idx) && idx >= 0 && idx < state.files.length) {
+            switchTo(idx);
+          }
+        }
+      }
+    });
+  }
+  if (lineSearchClear) {
+    lineSearchClear.addEventListener('click', function () {
+      if (lineSearchInput) {
+        lineSearchInput.value = '';
+        lineSearchInput.focus();
+      }
+      lineSearchClear.style.display = 'none';
+      hideLineSearchDropdown();
+      renderPathTree(false);
+    });
+  }
+
+  if (lineSearchDropdown) {
+    lineSearchDropdown.addEventListener('click', function (e) {
+      var item = e.target.closest('.path-search-dropdown-item');
+      if (item && item.dataset.prefix) {
+        selectLineFromDropdown(item.dataset.prefix);
+      }
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.path-search-row')) {
+      hideLineSearchDropdown();
+    }
+  });
+
   async function scrollToLastViewedPhoto() {
     if (!state.files || state.files.length === 0) {
       toast('尚未加载照片');
       return;
     }
 
-    // 从后向前查找最后一个已看照片（即查勘序列中进度最靠后的已浏览照片）
-    var targetIdx = -1;
-    for (var i = state.files.length - 1; i >= 0; i--) {
-      if (isFileViewed(state.files[i])) {
-        targetIdx = i;
-        break;
+    // 从后向前查找最后一个已看照片（优先命中 O(1) 索引缓存）
+    var targetIdx = (typeof state.lastViewedIndex === 'number' && state.lastViewedIndex >= 0) ? state.lastViewedIndex : -1;
+    if (targetIdx < 0) {
+      for (var i = state.files.length - 1; i >= 0; i--) {
+        if (isFileViewed(state.files[i])) {
+          targetIdx = i;
+          state.lastViewedIndex = i;
+          break;
+        }
       }
     }
 

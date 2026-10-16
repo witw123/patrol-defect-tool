@@ -3,7 +3,15 @@
 (function () {
   'use strict';
 
-  var invoke = window.__TAURI__ && window.__TAURI__.core ? window.__TAURI__.core.invoke : null;
+  function invoke(cmd, args) {
+    var inv = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+      || (window.__TAURI__ && window.__TAURI__.invoke)
+      || null;
+    if (!inv) {
+      return Promise.reject(new Error('Tauri invoke 尚未就绪: ' + cmd));
+    }
+    return inv(cmd, args);
+  }
 
   function b64urlEncode(text) {
     var bytes = new TextEncoder().encode(text);
@@ -150,6 +158,9 @@
     return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
   }
 
+  // 内存记录已写入/已读取的各线路清单内容特征指纹，只对真正发生变动的脏线路落盘
+  var lastSavedManifestLineMap = new Map();
+
   // ---------- 文件句柄 ----------
   function ShimFileHandle(path, name) {
     this.__path = path;
@@ -197,7 +208,7 @@
       },
       close: async function () {
         if (handleName === '输出清单.json') {
-          // 清单只存安装目录数据区，绝对不落输出目录；按整条线路（整个线，非支线）独立保存清单，杜绝碎片化与重复。
+          // 清单只存安装目录数据区，绝对不落输出目录；按整条线路（整个线，非支线）独立保存清单。
           var textContent = '';
           if (chunks.length > 0) {
             var total = 0;
@@ -224,72 +235,52 @@
             byLine[safeLine][outKey] = mEnt;
           }
 
-          // 查出当前已有的清单文件：清理旧的支线清单文件（直接删，合并入整线），只保留整个线的清单
-          var existingManifestLines = new Set();
-          try {
-            var appDir = await invoke('app_data_dir');
-            var existingFiles = await invoke('list_entries', { path: appDir });
-            for (var ei = 0; ei < existingFiles.length; ei++) {
-              var ef = existingFiles[ei];
-              if (!ef.is_dir && ef.name.startsWith('输出清单_') && ef.name.endsWith('.json')) {
-                var lName = ef.name.slice('输出清单_'.length, ef.name.length - '.json'.length);
-                var whole = sanitizeLineName(extractWholeLine(lName));
-                if (lName && whole && lName !== whole) {
-                  // 这是旧的支线清单文件（如 输出清单_10kV临沟121线东沟村10#变.json），合并其条目到整个线后直接物理删除！
-                  try {
-                    var oldRaw = await invoke('read_app_file', { name: ef.name });
-                    if (oldRaw) {
-                      var oldObj = JSON.parse(oldRaw);
-                      if (oldObj && oldObj.entries && typeof oldObj.entries === 'object') {
-                        if (!byLine[whole]) byLine[whole] = {};
-                        for (var oldK in oldObj.entries) {
-                          if (!byLine[whole][oldK]) {
-                            byLine[whole][oldK] = oldObj.entries[oldK];
-                          }
-                        }
-                      }
-                    }
-                  } catch (err) {}
-                  try {
-                    await invoke('remove_entry', { path: joinPath(appDir, ef.name), recursive: false });
-                  } catch (e) {}
-                  existingManifestLines.add(whole);
-                } else if (whole) {
-                  existingManifestLines.add(whole);
-                }
-              }
-            }
-          } catch (e) {}
-
-          var targetLines = new Set([...Object.keys(byLine), ...existingManifestLines]);
+          var targetLines = new Set([...Object.keys(byLine), ...lastSavedManifestLineMap.keys()]);
           if (targetLines.size === 0) {
-            await invoke('write_app_file', {
-              name: '输出清单.json',
-              content: textContent || '{"version":1,"entries":{}}'
-            });
+            var emptyPayload = textContent || '{"version":1,"entries":{}}';
+            if (lastSavedManifestLineMap.get('') !== emptyPayload) {
+              await invoke('write_app_file', {
+                name: '输出清单.json',
+                content: emptyPayload
+              });
+              lastSavedManifestLineMap.set('', emptyPayload);
+            }
           } else {
             for (var sLine of targetLines) {
               var lineManifestName = sLine ? ('输出清单_' + sLine + '.json') : '输出清单.json';
               var entriesForLine = byLine[sLine] || {};
               var entryCount = Object.keys(entriesForLine).length;
+              var lineFingerprint = JSON.stringify(entriesForLine);
+
               if (entryCount === 0 && sLine) {
-                // 若该线路已无条目，清理空清单
-                try {
-                  var appDir2 = await invoke('app_data_dir');
-                  await invoke('remove_entry', { path: joinPath(appDir2, lineManifestName), recursive: false });
-                } catch (e) {}
+                // 若该线路已无条目且之前存在记录，清理空清单文件
+                if (lastSavedManifestLineMap.has(sLine)) {
+                  try {
+                    var appDir2 = await invoke('app_data_dir');
+                    await invoke('remove_entry', { path: joinPath(appDir2, lineManifestName), recursive: false });
+                  } catch (e) {}
+                  lastSavedManifestLineMap.delete(sLine);
+                }
                 continue;
               }
+
+              // 核心脏检查：如果该线路的清单条目未发生任何增删改，绝对不写盘！
+              if (lastSavedManifestLineMap.get(sLine) === lineFingerprint) {
+                continue;
+              }
+
               var filePayload = JSON.stringify({
                 version: 1,
                 savedAt: new Date().toISOString(),
                 line: sLine || '默认线路',
                 entries: entriesForLine
               }, null, 2);
+
               await invoke('write_app_file', {
                 name: lineManifestName,
                 content: filePayload
               });
+              lastSavedManifestLineMap.set(sLine, lineFingerprint);
             }
           }
           return;
@@ -386,14 +377,6 @@
         if (ent.is_dir) continue;
         var ename = ent.name;
 
-        // 清理旧版残留的废弃 manifest-*.json 文件（直接删，不留向后兼容）
-        if (ename.startsWith('manifest-') && ename.endsWith('.json')) {
-          try {
-            await invoke('remove_entry', { path: joinPath(appDir, ename), recursive: false });
-          } catch (e) {}
-          continue;
-        }
-
         // 读取所有合法的输出清单：输出清单_*.json、*_输出清单.json、输出清单.json
         var isManifest = (ename === '输出清单.json') ||
                          (ename.startsWith('输出清单_') && ename.endsWith('.json')) ||
@@ -405,53 +388,17 @@
               var obj = JSON.parse(raw);
               if (obj && obj.entries && typeof obj.entries === 'object') {
                 Object.assign(mergedEntries, obj.entries);
+                var curLineKey = (ename === '输出清单.json') ? '' : sanitizeLineName(extractWholeLine(ename.slice('输出清单_'.length, ename.length - '.json'.length)));
+                lastSavedManifestLineMap.set(curLineKey, JSON.stringify(obj.entries));
               }
             } catch (e) {}
           }
-          if (ename.startsWith('输出清单_') && ename.endsWith('.json')) {
-            var rawName = ename.slice('输出清单_'.length, ename.length - '.json'.length);
-            var whole = sanitizeLineName(extractWholeLine(rawName));
-            if (rawName && whole && rawName !== whole) {
-              // 标记存在旧的支线清单文件
-              try {
-                await invoke('remove_entry', { path: joinPath(appDir, ename), recursive: false });
-              } catch (e) {}
-            }
-          }
-        }
-      }
-
-      // 如果有条目，按整个线重新组织并确保保存为整线清单文件，清理碎片化的支线文件
-      if (Object.keys(mergedEntries).length > 0) {
-        var byWholeLine = {};
-        for (var outK in mergedEntries) {
-          var mEnt = mergedEntries[outK];
-          var wLine = sanitizeLineName(extractLineFromKeyOrEntry(outK, mEnt));
-          if (!wLine || wLine === '默认线路') wLine = '';
-          if (!byWholeLine[wLine]) byWholeLine[wLine] = {};
-          byWholeLine[wLine][outK] = mEnt;
-        }
-        for (var wName of Object.keys(byWholeLine)) {
-          var lineManifestName = wName ? ('输出清单_' + wName + '.json') : '输出清单.json';
-          var filePayload = JSON.stringify({
-            version: 1,
-            savedAt: new Date().toISOString(),
-            line: wName || '默认线路',
-            entries: byWholeLine[wName]
-          }, null, 2);
-          try {
-            await invoke('write_app_file', {
-              name: lineManifestName,
-              content: filePayload
-            });
-          } catch (e) {}
         }
       }
 
       var handle = new ShimFileHandle(joinPath(this.__path, name), name);
       handle.__manifestContent = JSON.stringify({
         version: 1,
-        savedAt: new Date().toISOString(),
         entries: mergedEntries
       });
       return handle;
@@ -491,29 +438,75 @@
   // HTML 中的文件输入（模板导入）由 webview 原生支持，无需处理。
 
   // ---------- localStorage -> 安装目录数据文件（已看缓存/字典/主题/目录记忆等全部持久化） ----------
-  // Rust 启动时把 data/localStorage.json 注入 window.__PATROL_DATA__，这里同步接管后防抖写回。
+  // Rust 启动时把 data/localStorage.json 注入 window.__PATROL_DATA__，这里同步接管后节流写回。
   var __patrolStore = (window.__PATROL_DATA__ && typeof window.__PATROL_DATA__ === 'object')
     ? window.__PATROL_DATA__ : {};
   var __patrolTimer = null;
-  function persistStore() {
-    if (__patrolTimer) clearTimeout(__patrolTimer);
+
+  // 兜底：如果初始化时 window.__PATROL_DATA__ 为空，尝试从磁盘读入补充
+  if (Object.keys(__patrolStore).length === 0) {
+    setTimeout(function () {
+      invoke('read_app_file', { name: 'localStorage.json' }).then(function (raw) {
+        if (!raw) return;
+        try {
+          var parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            for (var pk in parsed) {
+              if (!Object.prototype.hasOwnProperty.call(__patrolStore, pk)) {
+                __patrolStore[pk] = parsed[pk];
+              }
+            }
+          }
+        } catch (e) {}
+      }).catch(function () {});
+    }, 0);
+  }
+
+  function persistStore(immediate) {
+    if (immediate) {
+      if (__patrolTimer) {
+        clearTimeout(__patrolTimer);
+        __patrolTimer = null;
+      }
+      try {
+        invoke('write_app_file', {
+          name: 'localStorage.json',
+          content: JSON.stringify(__patrolStore)
+        }).catch(function (e) {
+          console.warn('[Storage] immediate write failed:', e);
+        });
+      } catch (e) {
+        console.warn('[Storage] immediate invoke error:', e);
+      }
+      return;
+    }
+    // 节流写入：80ms 快速持久化，避免用户连续切图时无休止推迟保存
+    if (__patrolTimer) return;
     __patrolTimer = setTimeout(function () {
       __patrolTimer = null;
       try {
         invoke('write_app_file', {
           name: 'localStorage.json',
           content: JSON.stringify(__patrolStore)
+        }).catch(function (e) {
+          console.warn('[Storage] debounced write failed:', e);
         });
-      } catch (e) { }
-    }, 250);
+      } catch (e) {
+        console.warn('[Storage] debounced invoke error:', e);
+      }
+    }, 80);
   }
+
   function SimpleStorage() { }
   SimpleStorage.prototype.getItem = function (k) {
     k = String(k);
     return Object.prototype.hasOwnProperty.call(__patrolStore, k) ? __patrolStore[k] : null;
   };
   SimpleStorage.prototype.setItem = function (k, v) {
-    __patrolStore[String(k)] = String(v);
+    var strK = String(k);
+    var strV = String(v);
+    if (__patrolStore[strK] === strV) return;
+    __patrolStore[strK] = strV;
     persistStore();
   };
   SimpleStorage.prototype.removeItem = function (k) {
@@ -522,7 +515,10 @@
   };
   SimpleStorage.prototype.clear = function () {
     for (var k in __patrolStore) delete __patrolStore[k];
-    persistStore();
+    persistStore(true);
+  };
+  SimpleStorage.prototype.flush = function () {
+    persistStore(true);
   };
   SimpleStorage.prototype.key = function (i) {
     var keys = Object.keys(__patrolStore);
@@ -532,6 +528,14 @@
     get: function () { return Object.keys(__patrolStore).length; }
   });
   window.localStorage = new SimpleStorage();
+
+  // 页面卸载或退到后台时强制即刻落盘
+  window.addEventListener('beforeunload', function () { persistStore(true); });
+  window.addEventListener('pagehide', function () { persistStore(true); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) persistStore(true);
+  });
+
 
   // ---------- IndexedDB shim：目录句柄持久化为路径字符串（底层走上面的 localStorage） ----------
   var STORE_KEY = '__pdefile_handle_db__';

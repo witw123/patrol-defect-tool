@@ -1,9 +1,9 @@
-// 画布渲染引擎 (GPU加速/RAF批处理)、坐标映射、缩放平移与红框标注交互
+﻿// 画布渲染引擎 (GPU加速/RAF批处理)、坐标映射、缩放平移与红框标注交互
 
 
   /* ================= 视图渲染 ================= */
 
-  var cachedCanvasRect = null;
+  var cachedCanvasRect = null, cachedContainerSize = null;
   function getCanvasRect() {
     if (!cachedCanvasRect) {
       cachedCanvasRect = overlayCanvas.getBoundingClientRect();
@@ -12,14 +12,30 @@
   }
   function invalidateCanvasRect() {
     cachedCanvasRect = null;
+    cachedContainerSize = null;
   }
   window.addEventListener('resize', invalidateCanvasRect);
 
+  function getContainerSize() {
+    if (!cachedContainerSize) {
+      var container = $('stageContainer') || viewer;
+      var pad = 6;
+      cachedContainerSize = {
+        availW: Math.max(10, (container ? container.clientWidth : 0) - pad * 2),
+        availH: Math.max(10, (container ? container.clientHeight : 0) - pad * 2)
+      };
+    }
+    return cachedContainerSize;
+  }
+
   function computeFit(nw, nh) {
-    var container = $('stageContainer') || viewer;
-    var pad = 6;
-    var availW = Math.max(10, (container ? container.clientWidth : 0) - pad * 2);
-    var availH = Math.max(10, (container ? container.clientHeight : 0) - pad * 2);
+    var cSize = getContainerSize();
+    var availW = cSize.availW;
+    var availH = cSize.availH;
+
+
+
+
     if (!nw || !nh || nw <= 0 || nh <= 0) {
       if (state.natural && state.natural.w > 0 && state.natural.h > 0) {
         nw = state.natural.w;

@@ -58,7 +58,7 @@
 
         if (matchedOrigF) {
           var cleanBlob = matchedOrigF.file || await matchedOrigF.handle.getFile();
-          var subCategory = (bFile.parentDirName === '全绝缘缺陷' || bFile.parentDirName === '其他缺陷')
+          var subCategory = (bFile.parentDirName && autoCategoryRules && autoCategoryRules[bFile.parentDirName] !== undefined)
             ? bFile.parentDirName
             : getDefectCategory(null, null, matchedOrigF.name, bName);
           var subOrigFolderHandle = await origFolderHandle.getDirectoryHandle(subCategory, { create: true });

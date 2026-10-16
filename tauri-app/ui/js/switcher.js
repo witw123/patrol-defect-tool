@@ -137,9 +137,9 @@
           isBoxed: isBoxedImg
         };
 
-        // 核心内存防线：如果加载完成时用户已经大幅切走（距离当前显示位置 > 2 张），
+        // 核心内存防线：如果加载完成时用户已经大幅切走（距离当前显示位置 > 6 张），
         // 视为过期失效任务，立即销毁释放显存，绝不塞入缓存挤出当前有用的相邻图片
-        if (state.index >= 0 && Math.abs(index - state.index) > 2) {
+        if (state.index >= 0 && Math.abs(index - state.index) > 6) {
           disposeCacheItem(c);
           return null;
         }
@@ -191,7 +191,7 @@
 
   var preloadQueue = [];
   var activePreloadCount = 0;
-  var MAX_CONCURRENT_PRELOAD = 1; // 控制在 1 个后台解码，留出全部系统算力确保前台切图和渲染 120 满帧
+  var MAX_CONCURRENT_PRELOAD = 2; // 双路后台异步解码，充分发挥多核并发优势
   var preloadGeneration = 0;      // 换代计数器：切图时作废旧代任务
 
   function schedulePreload(curIdx) {
@@ -207,24 +207,30 @@
     var seen = new Set();
     seen.add(curIdx);
 
-    // 1. 向前预测 1~2 张（主切图方向）
+    // 1. 向前预测 3~4 张（主切图方向）
     var fwd = curIdx;
-    for (var i = 0; i < 2; i++) {
+    for (var i = 0; i < 4; i++) {
       var next = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(fwd, 1) : (fwd + 1);
       if (next >= 0 && next < state.files.length && !seen.has(next)) {
         seen.add(next);
-        targets.push({ idx: next, priority: 10 - i });
+        targets.push({ idx: next, priority: 20 - i * 2 });
         fwd = next;
       } else {
         break;
       }
     }
 
-    // 2. 向后缓冲 1 张（回看微缓冲）
-    var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(curIdx, -1) : (curIdx - 1);
-    if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
-      seen.add(prev);
-      targets.push({ idx: prev, priority: 5 });
+    // 2. 向后缓冲 2 张（回看微缓冲）
+    var bwd = curIdx;
+    for (var j = 0; j < 2; j++) {
+      var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(bwd, -1) : (bwd - 1);
+      if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
+        seen.add(prev);
+        targets.push({ idx: prev, priority: 12 - j * 2 });
+        bwd = prev;
+      } else {
+        break;
+      }
     }
 
     // 过滤掉已处于有效缓存中的目标
@@ -251,20 +257,16 @@
 
   function processPreloadQueue(gen) {
     if (gen !== preloadGeneration) return;
-    if (activePreloadCount >= MAX_CONCURRENT_PRELOAD || preloadQueue.length === 0) return;
+    while (activePreloadCount < MAX_CONCURRENT_PRELOAD && preloadQueue.length > 0) {
+      var nextIdx = preloadQueue.shift();
+      activePreloadCount++;
 
-    var nextIdx = preloadQueue.shift();
-    activePreloadCount++;
-
-    getImage(nextIdx).catch(function () {}).finally(function () {
-      activePreloadCount--;
-      if (gen === preloadGeneration) {
-        processPreloadQueue(gen);
-      }
-    });
-
-    if (activePreloadCount < MAX_CONCURRENT_PRELOAD && preloadQueue.length > 0) {
-      processPreloadQueue(gen);
+      getImage(nextIdx).catch(function () {}).finally(function () {
+        activePreloadCount--;
+        if (gen === preloadGeneration) {
+          processPreloadQueue(gen);
+        }
+      });
     }
   }
 
@@ -466,11 +468,12 @@
     updateCriticalButtonState(isCurPhotoCritical);
     if (btnBackToCurrent) {
       btnBackToCurrent.style.display = (state.files && state.files.length > 0) ? 'inline-flex' : 'none';
-      var lastVIdx = -1;
-      if (state.files) {
+      var lastVIdx = (typeof state.lastViewedIndex === 'number' && state.lastViewedIndex >= 0) ? state.lastViewedIndex : -1;
+      if (lastVIdx < 0 && state.files) {
         for (var vi = state.files.length - 1; vi >= 0; vi--) {
           if (isFileViewed(state.files[vi])) {
             lastVIdx = vi;
+            state.lastViewedIndex = vi;
             break;
           }
         }
@@ -511,11 +514,19 @@
     filenameEl.title = f.relPath || f.name;
   }
 
+  var pendingSyncRaf = null;
+
   function syncAllUI(index) {
     if (index < 0 || !state.files || !state.files[index]) return;
     updateHud();
-    renderSide();
-    updatePathTreeSelection(index, true);
+    if (pendingSyncRaf) {
+      cancelAnimationFrame(pendingSyncRaf);
+    }
+    pendingSyncRaf = requestAnimationFrame(function () {
+      pendingSyncRaf = null;
+      renderSide();
+      updatePathTreeSelection(index, true);
+    });
   }
 
   async function switchTo(index, force) {
@@ -548,11 +559,8 @@
     selectedIndex = -1;
 
     var curF = state.files[index];
-    var isNewlyViewed = false;
-    var curKeyForView = fileKey(curF);
-    if (curKeyForView && !viewedPhotosMap[curKeyForView]) {
-      viewedPhotosMap[curKeyForView] = true;
-      isNewlyViewed = true;
+    var isNewlyViewed = markFileViewed(curF);
+    if (isNewlyViewed) {
       saveViewedPhotos();
     }
 
@@ -726,7 +734,16 @@
     });
   }
 
-  if (searchInput) searchInput.addEventListener('input', function () { renderSide(); });
+  var defectSearchDebounceTimer = null;
+  if (searchInput) {
+    searchInput.addEventListener('input', function () {
+      if (defectSearchDebounceTimer) clearTimeout(defectSearchDebounceTimer);
+      defectSearchDebounceTimer = setTimeout(function () {
+        defectSearchDebounceTimer = null;
+        renderSide();
+      }, 80);
+    });
+  }
   if (searchClear) {
     searchClear.addEventListener('click', function () {
       if (searchInput) searchInput.value = '';

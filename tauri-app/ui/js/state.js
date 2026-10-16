@@ -21,7 +21,9 @@
     markedDefectTags: new Map(),    // 原文件名 -> 已标记保存的缺陷标签文本（如 '_导线断股'）
     criticalFiles: new Set(),       // 已独立保存过「危急缺陷」的原始文件名（与 markedFiles 完全独立统计）
     markedCounts: new Map(),        // 原文件名 -> 已标记保存的次数（同一照片二次编辑输出多个缺陷时递增）
-    discoveredDirs: []              // 扫描过程中发现的所有子目录路径集合（包含空文件夹，确保杆塔数100%匹配实际文件夹数）
+    discoveredDirs: [],              // 扫描过程中发现的所有子目录路径集合（包含空文件夹，确保杆塔数100%匹配实际文件夹数）
+    leafDirs: null,                  // 预计算的叶子目录缓存（避免每次统计O(N^2)）
+    lastViewedIndex: -1              // 最后一个已看照片的索引（避免每次updateHud O(N)倒查）
   };
   var output = { mainHandle: null, mainName: '' };
   var defectDict = JSON.parse(JSON.stringify(DEFAULT_DEFECT_DICT)); // 动态缺陷字典：category -> [texts]
@@ -60,7 +62,7 @@
   var viewer = $('viewer'), stageContainer = $('stageContainer'), stage = $('stage');
   var viewerBottomBar = $('viewerBottomBar'), previewEl = $('preview'), btnBottomSave = $('btnBottomSave'), btnClearSecondary = $('btnClearSecondary'), btnCritical = $('btnCritical');
   var pathPanel = $('pathPanel'), pathTree = $('pathTree'), dirSummaryText = $('dirSummaryText'), btnBackToCurrent = $('btnBackToCurrent');
-  var btnSyncOutput = $('btnSyncOutput');
+  var btnSyncOutput = $('btnSyncOutput'), lineSearchInput = $('lineSearchInput'), lineSearchClear = $('lineSearchClear'), dirSummaryLineCount = $('dirSummaryLineCount'), lineSearchDropdown = $('lineSearchDropdown');
   var btnFilterAll = $('btnFilterAll'), btnFilterMarked = $('btnFilterMarked');
   var btnFilterUnmarked = $('btnFilterUnmarked'), btnFilterUnviewed = $('btnFilterUnviewed');
   var sideCurLine = $('sideCurLine'), sideCurTower = $('sideCurTower'), sideCurLoc = $('sideCurLoc');
@@ -79,7 +81,11 @@
 
   // 二级界面：推荐规则与分类列表配置弹窗 DOM
   var recommendModal = $('recommendModal');
-  var tabModalRec = $('tabModalRec'), tabModalCat = $('tabModalCat');
+  var tabModalRec = $('tabModalRec'), tabModalCat = $('tabModalCat'), tabModalAutoCat = $('tabModalAutoCat');
+  var modalViewAutoCat = $('modalViewAutoCat'), modalAutoCatSearchInput = $('modalAutoCatSearchInput');
+  var btnModalCreateAutoCat = $('btnModalCreateAutoCat'), btnResetAutoCatDefault = $('btnResetAutoCatDefault');
+  var modalAutoCatListScroll = $('modalAutoCatListScroll'), btnOpenAutoCatSettings = $('btnOpenAutoCatSettings');
+  var autoCategoryRules = (typeof DEFAULT_AUTO_CATEGORIES !== 'undefined') ? JSON.parse(JSON.stringify(DEFAULT_AUTO_CATEGORIES)) : {};
   var btnCloseRecModalTop = $('btnCloseRecModalTop'), btnCloseRecModal = $('btnCloseRecModal');
   var modalViewRec = $('modalViewRec'), modalViewCat = $('modalViewCat');
   
@@ -113,6 +119,7 @@
   /* ================= 左右边栏拖拽调宽与智能自适应 ================= */
 
   function recomputeViewerStage() {
+    if (typeof invalidateCanvasRect === 'function') invalidateCanvasRect();
     if (state.index >= 0) {
       var key = curKey();
       var c = key ? state.cache.get(key) : null;

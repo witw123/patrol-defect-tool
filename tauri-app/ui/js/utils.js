@@ -125,23 +125,28 @@
   function curName() { var f = curFile(); return f ? f.name : null; }
   function curKey() { var f = curFile(); return f ? fileKey(f) : ''; }
 
-  function sanitizeViewedPhotos() {
-    if (!state.files || state.files.length === 0 || !viewedPhotosMap) return;
-    var hasNestedPaths = state.files.some(function (f) { return f.relPath && f.relPath.indexOf('/') >= 0; });
-    var changed = false;
-    for (var k in viewedPhotosMap) {
-      if (hasNestedPaths && k.indexOf('/') < 0) {
-        delete viewedPhotosMap[k];
-        changed = true;
-      }
-    }
-    if (changed) saveViewedPhotos();
+  function isFileViewed(f) {
+    if (!f || !viewedPhotosMap) return false;
+    var k = fileKey(f);
+    if (viewedPhotosMap[k]) return true;
+    if (f.relPath && viewedPhotosMap[f.relPath]) return true;
+    if (f.name && viewedPhotosMap[f.name]) return true;
+    return false;
   }
 
-  function isFileViewed(f) {
-    if (!f) return false;
+  function markFileViewed(f) {
+    if (!f || !viewedPhotosMap) return false;
+    var isNew = !isFileViewed(f);
     var k = fileKey(f);
-    return !!(viewedPhotosMap && viewedPhotosMap[k]);
+    if (k) viewedPhotosMap[k] = true;
+    if (f.relPath) viewedPhotosMap[f.relPath] = true;
+    if (f.name) viewedPhotosMap[f.name] = true;
+    if (typeof state !== 'undefined' && state && state.index >= 0) {
+      if (state.index > (state.lastViewedIndex || -1)) {
+        state.lastViewedIndex = state.index;
+      }
+    }
+    return isNew;
   }
 
   function getMeta(target) {
@@ -181,7 +186,7 @@
   }
   var savedTimer = null;
   function flashSaved(msg) {
-    savedFlash.textContent = msg || '已保存 ✓';
+    savedFlash.innerHTML = msg || ('<svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;margin-right:2px"><polyline points="20 6 9 17 4 12"></polyline></svg>已保存');
     savedFlash.classList.add('show');
     clearTimeout(savedTimer);
     savedTimer = setTimeout(function () { savedFlash.classList.remove('show'); }, 1500);

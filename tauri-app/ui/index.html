@@ -26,32 +26,63 @@
       <span id="strokeVal">10px</span>
     </div>
 
-    <button id="btnPrev" class="btn nav" type="button" title="上一张 (← / A)">◀</button>
-    <button id="btnNext" class="btn nav" type="button" title="下一张 (→ / D)">▶</button>
+    <button id="btnPrev" class="btn nav" type="button" title="上一张 (← / A)"><svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="display:block"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+    <button id="btnNext" class="btn nav" type="button" title="下一张 (→ / D)"><svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="display:block"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
     <span id="counter">— / —</span>
     <span id="groupTag"></span>
     <span id="filename"></span>
     <span id="dirtyDot" title="当前图片已绘制红框（保存时自动同步输出至「缺陷圈示图」与「缺陷原图」对应「全绝缘缺陷」或「其他缺陷」子目录，原图不修改）"></span>
-    <span id="savedFlash">已保存 ✓</span>
+    <span id="savedFlash"><svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;margin-right:2px"><polyline points="20 6 9 17 4 12"></polyline></svg>已保存</span>
   </div>
 
   <div id="main">
     <div id="pathPanel">
       <div class="path-head">
-        <span>线路统计</span>
-        <div style="display:flex;align-items:center;gap:4px">
-          <button id="btnSyncOutput" class="mini-tool-btn" type="button" title="从输出目录的缺陷圈示图重新扫描同步已标记状态" style="height:20px;font-size:10.5px;padding:0 5px;color:var(--accent)">刷新输出</button>
-          <span id="dirSummaryText" style="font-size:10.5px;color:var(--muted)"></span>
+        <div class="path-head-title">
+          <span>线路列表</span>
+          <span id="dirSummaryLineCount" class="path-count-badge" style="display:none">0 线路</span>
         </div>
+        <div class="path-head-actions">
+          <button id="btnSyncOutput" class="mini-icon-btn" type="button" title="从输出目录重新扫描同步已标记状态">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
+          <button id="btnExpandAll" class="mini-icon-btn" type="button" title="全部展开线路与杆塔">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><polyline points="7 13 12 18 17 13"></polyline><polyline points="7 6 12 11 17 6"></polyline></svg>
+          </button>
+          <button id="btnCollapseAll" class="mini-icon-btn" type="button" title="全部折叠线路与杆塔">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><polyline points="17 11 12 6 7 11"></polyline><polyline points="17 18 12 13 7 18"></polyline></svg>
+          </button>
+          <button id="btnAutoFit" class="mini-icon-btn" type="button" title="自适应宽度（或双击右侧分割线）">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+          </button>
+        </div>
+
+
+
+      </div>
+
+      <div class="path-search-row">
+        <div class="path-search-wrap">
+          <svg class="path-search-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input id="lineSearchInput" type="text" placeholder="搜索线路名称..." autocomplete="off" spellcheck="false">
+          <button id="lineSearchClear" class="path-search-clear" type="button" title="清空线路搜索" style="display:none">
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+        <div id="lineSearchDropdown" class="path-search-dropdown" style="display:none"></div>
+      </div>
+
+      <div class="path-summary-bar">
+        <span id="dirSummaryText"></span>
       </div>
       <div class="path-tools">
         <button id="btnFilterAll" class="mini-tool-btn active" type="button" title="查看所有照片">全部</button>
-        <button id="btnFilterMarked" class="mini-tool-btn" type="button" title="仅查看已标记保存的缺陷图片">已标记</button>
-        <button id="btnFilterUnmarked" class="mini-tool-btn" type="button" title="仅查看尚未标记保存的图片">未标记</button>
+        <button id="btnFilterMarked" class="mini-tool-btn" type="button" title="仅查看已标记保存的缺陷图片">已标</button>
+        <button id="btnFilterUnmarked" class="mini-tool-btn" type="button" title="仅查看尚未标记保存的图片">未标</button>
         <button id="btnFilterUnviewed" class="mini-tool-btn" type="button" title="仅查看尚未浏览的照片">未看</button>
-        <button id="btnExpandAll" class="mini-tool-btn" type="button" title="全部展开前缀分组">展开</button>
-        <button id="btnCollapseAll" class="mini-tool-btn" type="button" title="全部折叠前缀分组">折叠</button>
-        <button id="btnAutoFit" class="mini-tool-btn" type="button" title="根据名称长度自动适配宽度">自适应</button>
+
+
+
       </div>
       <div id="pathTreeContainer">
         <div id="pathTree"></div>
@@ -156,6 +187,7 @@
       </div>
     </div>
     <div class="row"><button id="btnOpenRecSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px;color:var(--accent);font-weight:600">修改推荐与分类规则</button></div>
+    <div class="row"><button id="btnOpenAutoCatSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px;color:var(--accent);font-weight:600">自动保存分类规则库</button></div>
     <div class="row"><button id="btnExportTemplateSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">导出标签与推荐模板</button></div>
     <div class="row"><button id="btnImportTemplateSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">导入外部模板文件</button></div>
     <div class="row"><button id="btnClearViewedSettings" class="btn" type="button" style="height:24px;padding:0 6px;font-size:11px">重置清空已看记录</button></div>
@@ -176,7 +208,7 @@
         3. <b>候选分类池自由管理</b>：候选池支持一键「+ 新增词项」、「管理词池」（逐个编辑或删除）及恢复默认；<br>
         4. <b>输出目录联动筛选</b>：系统自动从指定的输出目录读取<b>已标记保存的杆塔与照片信息</b>，并在左侧栏提供「已标记」与「未标记」快速筛选。<br>
         5. <b>已看杆塔数统计</b>：左侧栏全面展示<b>已看杆塔数与总杆塔数</b>实时统计，浏览照片自动累计已看进度。<br>
-        6. <b>危急缺陷可自定义</b>：在右侧缺陷列表中，点击每个缺陷右侧的「⚠」按钮即可自行设置或取消危急缺陷属性；设置会自动保存。<br>
+        6. <b>危急缺陷可自定义</b>：在右侧缺陷列表中，点击每个缺陷右侧的危急按钮即可自行设置或取消危急缺陷属性；设置会自动保存。<br>
         7. <b>模板导出与复用</b>：右侧栏新增「导出模板」与「导入模板」，会同时保存危急缺陷属性、缺陷分类和智能关联推荐机制，方便跨设备或在不同工程中复用。
       </div>
       <label class="checkbox-row"><input id="noPromptCheck" type="checkbox"> 不再提示</label>
@@ -194,8 +226,9 @@
         <div class="modal-tab-group">
           <button id="tabModalRec" class="modal-tab-btn active" type="button">目标部件与关联推荐</button>
           <button id="tabModalCat" class="modal-tab-btn" type="button">缺陷分类总表管理</button>
+          <button id="tabModalAutoCat" class="modal-tab-btn" type="button">自动保存分类库</button>
         </div>
-        <button id="btnCloseRecModalTop" class="action-icon-btn" type="button" title="关闭" style="font-size:13px;width:22px;height:22px">✕</button>
+        <button id="btnCloseRecModalTop" class="action-icon-btn" type="button" title="关闭" style="width:22px;height:22px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
       </div>
 
       <!-- 视图 1：目标部件与关联推荐配置（增删改目标部件、增删改关联分类、增删改候选分类池） -->
@@ -218,7 +251,7 @@
           <div class="rec-field-label">
             <span>当前关联推荐分类列表：</span>
             <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-size:11px;color:var(--muted)">点击 ✎ 修改，点击 ✕ 移除</span>
+              <span style="font-size:11px;color:var(--muted)">点击修改，点击移除</span>
               <button id="btnClearAllCurRec" class="mini-tool-btn" type="button" style="height:19px;font-size:10.5px">清空推荐</button>
             </div>
           </div>
@@ -250,7 +283,7 @@
               </div>
               <div style="display:flex;align-items:center;gap:4px">
                 <button id="btnAddCandidateItem" class="mini-tool-btn" type="button" title="向候选分类池新增词项（支持输入多个，用逗号或空格隔开）" style="color:var(--accent);font-weight:600;height:22px;font-size:11px">新增词项</button>
-                <button id="btnToggleCandidateManage" class="mini-tool-btn" type="button" title="切换管理模式：可直接重命名✎或删除✕分类池中的词项" style="height:22px;font-size:11px">管理词池</button>
+                <button id="btnToggleCandidateManage" class="mini-tool-btn" type="button" title="切换管理模式：可直接重命名或删除分类池中的词项" style="height:22px;font-size:11px">管理词池</button>
                 <button id="btnResetCandidatePool" class="mini-tool-btn" type="button" title="恢复系统默认候选分类池" style="height:22px;font-size:11px;color:var(--muted)">恢复默认</button>
               </div>
             </div>
@@ -269,6 +302,21 @@
           <button id="btnModalCreateCat" class="btn primary" type="button" style="height:28px;white-space:nowrap;padding:0 12px">新建缺陷分类</button>
         </div>
         <div id="modalCatListScroll" style="flex:1 1 auto;overflow-y:auto;min-height:220px;max-height:48vh;border:1px solid var(--panel-border);border-radius:5px;padding:8px;background:var(--panel-bg)"></div>
+      </div>
+
+      <!-- 视图 3：自动保存分类库（全绝缘/其他缺陷等自动输出子目录与匹配标签管理） -->
+      <div id="modalViewAutoCat" class="rec-body" style="display:none">
+        <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:6px">
+          保存缺陷图片时，系统会根据缺陷描述标签自动匹配以下分类库，并同步输出至「缺陷圈示图/分类」与「缺陷原图/分类」对应子目录。标签为空的分类将作为兜底目录。
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+          <input id="modalAutoCatSearchInput" class="mini-input" type="text" placeholder="搜索分类名称或匹配标签…" style="height:28px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <button id="btnModalCreateAutoCat" class="btn primary" type="button" style="height:28px;white-space:nowrap;padding:0 12px">新建分类</button>
+            <button id="btnResetAutoCatDefault" class="btn" type="button" style="height:28px;white-space:nowrap;padding:0 8px;font-size:11px" title="恢复默认自动保存分类（全绝缘缺陷、其他缺陷）">重置分类库</button>
+          </div>
+        </div>
+        <div id="modalAutoCatListScroll" style="flex:1 1 auto;overflow-y:auto;min-height:220px;max-height:48vh;border:1px solid var(--panel-border);border-radius:5px;padding:8px;background:var(--panel-bg);display:flex;flex-direction:column;gap:8px"></div>
       </div>
 
       <div class="card-actions" style="justify-content:space-between;margin-top:8px">

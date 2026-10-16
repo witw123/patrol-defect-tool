@@ -1,4 +1,4 @@
-// 全局事件绑定、主题/缩放持久化与主程序启动初始化
+﻿// 全局事件绑定、主题/缩放持久化与主程序启动初始化
 
   /* ================= 主题 / 设置 ================= */
 
@@ -41,6 +41,7 @@
     loadCriticalDefects();
     loadAdjacency();
     loadViewedPhotos();
+    loadAutoCategories();
     loadCandidatePool();
   }
 

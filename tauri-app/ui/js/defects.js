@@ -258,23 +258,26 @@
   function saveViewedPhotos(immediate) {
     if (immediate) {
       if (saveViewedTimer) { clearTimeout(saveViewedTimer); saveViewedTimer = null; }
-      try { localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap)); } catch (e) {}
+      try {
+        localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap));
+        if (typeof localStorage.flush === "function") localStorage.flush();
+      } catch (e) {
+        console.warn("saveViewedPhotos immediate error:", e);
+      }
       return;
     }
-    if (saveViewedTimer) clearTimeout(saveViewedTimer);
+    // 实时保存：60ms 节流落盘，切一张存一张，连续翻图不推迟
+    if (saveViewedTimer) return;
     saveViewedTimer = setTimeout(function () {
       saveViewedTimer = null;
-      var doSave = function () {
-        try { localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap)); } catch (e) {}
-      };
-      if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(doSave, { timeout: 1000 });
-      } else {
-        doSave();
+      try {
+        localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap));
+      } catch (e) {
+        console.warn("saveViewedPhotos error:", e);
       }
-    }, 1200);
+    }, 60);
   }
-  window.addEventListener('beforeunload', function () {
+  window.addEventListener("beforeunload", function () {
     saveViewedPhotos(true);
     try {
       if (outputManifestWriteTimer) {
@@ -284,11 +287,17 @@
       }
     } catch (e) {}
   });
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden && outputManifestWriteTimer) {
-      clearTimeout(outputManifestWriteTimer);
-      outputManifestWriteTimer = null;
-      saveOutputManifestNow();
+  window.addEventListener("pagehide", function () {
+    saveViewedPhotos(true);
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      saveViewedPhotos(true);
+      if (outputManifestWriteTimer) {
+        clearTimeout(outputManifestWriteTimer);
+        outputManifestWriteTimer = null;
+        saveOutputManifestNow();
+      }
     }
   });
   function loadViewedPhotos() {
@@ -299,6 +308,34 @@
         if (obj && typeof obj === 'object') viewedPhotosMap = obj;
       }
     } catch (e) {}
+  }
+
+  function saveAutoCategories() {
+    try {
+      localStorage.setItem(KEY_AUTO_CATEGORIES, JSON.stringify(autoCategoryRules));
+      if (typeof localStorage.flush === 'function') localStorage.flush();
+    } catch (e) {
+      console.warn('saveAutoCategories error:', e);
+    }
+  }
+
+  function loadAutoCategories() {
+    try {
+      var raw = localStorage.getItem(KEY_AUTO_CATEGORIES);
+      if (raw) {
+        var obj = JSON.parse(raw);
+        if (obj && typeof obj === 'object' && Object.keys(obj).length > 0) {
+          autoCategoryRules = obj;
+          return;
+        }
+      }
+    } catch (e) {}
+    autoCategoryRules = JSON.parse(JSON.stringify(DEFAULT_AUTO_CATEGORIES));
+  }
+
+  function resetAutoCategories() {
+    autoCategoryRules = JSON.parse(JSON.stringify(DEFAULT_AUTO_CATEGORIES));
+    saveAutoCategories();
   }
 
   var lastRenderedSideLoc = null;
@@ -324,15 +361,15 @@
         var aTag = pv.appended[ti];
         var isCrit = isCriticalDefectTag(aTag);
         if (isCrit) isAnyCritical = true;
-        tagsHtml += '<span class="preview-tag ' + (isCrit ? 'is-crit-tag' : '') + '" data-idx="' + ti + '" data-tag="' + esc(aTag) + '" title="点击直接撤回/移除此缺陷命名" ' + (isCrit ? 'style="border-color:rgba(220,38,38,0.5);color:#dc2626;background:rgba(220,38,38,0.08)"' : '') + '>' + esc(aTag) + '<span class="tag-del-x">✕</span></span>';
+        tagsHtml += '<span class="preview-tag ' + (isCrit ? 'is-crit-tag' : '') + '" data-idx="' + ti + '" data-tag="' + esc(aTag) + '" title="点击直接撤回/移除此缺陷命名" ' + (isCrit ? 'style="border-color:rgba(220,38,38,0.5);color:#dc2626;background:rgba(220,38,38,0.08)"' : '') + '>' + esc(aTag) + '<span class="tag-del-x" style="display:inline-flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></span></span>';
       }
     }
 
-    var critBadgeHtml = isAnyCritical ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(220,38,38,0.15);color:#dc2626;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid rgba(220,38,38,0.35);margin-left:6px" title="当前缺陷已被用户设为危急：点击下方「保存缺陷图片」按钮时会自动额外存入「危急缺陷」目录。与右侧独立的「危急缺陷」按钮互不关联">⚠️ 系统判定危急（随主保存自动存入）</span>' : '';
+    var critBadgeHtml = isAnyCritical ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(220,38,38,0.15);color:#dc2626;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid rgba(220,38,38,0.35);margin-left:6px" title="当前缺陷已被用户设为危急：点击下方「保存缺陷图片」按钮时会自动额外存入「危急缺陷」目录。与右侧独立的「危急缺陷」按钮互不关联">' + ICONS.warning + ' 系统判定危急（随主保存自动存入）</span>' : '';
 
     var f = curFile();
     var fKey = f ? (f.relPath || f.name) : name;
-    var criticalSavedBadgeHtml = (state.criticalFiles && state.criticalFiles.has(fKey)) ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(31,122,60,0.15);color:var(--ok);font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid rgba(31,122,60,0.35);margin-left:6px" title="已通过「危急缺陷」按钮独立保存过该照片">✓ 已存危急缺陷</span>' : '';
+    var criticalSavedBadgeHtml = (state.criticalFiles && state.criticalFiles.has(fKey)) ? '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(31,122,60,0.15);color:var(--ok);font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid rgba(31,122,60,0.35);margin-left:6px" title="已通过「危急缺陷」按钮独立保存过该照片">' + ICONS.check + ' 已存危急缺陷</span>' : '';
 
     var disp = '<span class="preview-base" title="' + esc(pv.base) + '">' + esc(pv.base) + '</span>' + (tagsHtml || '') + '<span class="preview-ext">' + esc(pv.ext) + '</span>' + critBadgeHtml + criticalSavedBadgeHtml;
     if (previewEl) previewEl.innerHTML = disp;
@@ -381,7 +418,7 @@
     var html = '';
     // 缺陷分类区头部：直接集成「修改推荐规则」与「新建分类」
     html += '<div class="sec-title">';
-    html += '  <span title="点击缺陷标签右侧的⚠按钮，可自行设置/取消危急缺陷属性">缺陷分类 <span style="font-size:10px;color:var(--muted);font-weight:400">（⚠ 可设置危急）</span></span>';
+    html += '  <span title="点击缺陷标签右侧危急按钮，可自行设置/取消危急缺陷属性">缺陷分类 <span style="font-size:10px;color:var(--muted);font-weight:400">（可设置危急）</span></span>';
     html += '  <div style="display:flex;align-items:center;gap:4px">';
     html += '    <button id="btnSideConfigRec" class="mini-tool-btn" type="button" title="进入推荐规则与分类管理二级界面" style="color:var(--accent);font-weight:600;height:22px">修改推荐规则</button>';
     html += '    <button id="btnSideAddCat" class="mini-tool-btn" type="button" title="新建缺陷分类" style="height:22px">新建分类</button>';
@@ -448,7 +485,7 @@
     var isCrit = isCriticalDefectTag(t);
     var critBadge = isCrit ? '<span class="critical-indicator" title="用户已将此缺陷设为危急缺陷，保存时会额外输出至「危急缺陷」目录" style="display:inline-flex;align-items:center;justify-content:center;background:rgba(239,68,68,0.14);color:#dc2626;font-size:10px;font-weight:700;padding:1px 4px;border-radius:3px;margin-right:4px;border:1px solid rgba(239,68,68,0.35);flex-shrink:0">危急</span>' : '';
     var textStyle = isCrit ? 'color:#dc2626;font-weight:600' : '';
-    var criticalBtn = '<button class="action-icon-btn critical-toggle-btn ' + (isCrit ? 'active' : '') + '" title="' + (isCrit ? '取消【' + esc(t) + '】的危急缺陷属性' : '将【' + esc(t) + '】设为危急缺陷') + '" data-category="' + esc(cat) + '" data-text="' + esc(t) + '" aria-label="' + (isCrit ? '取消危急缺陷' : '设为危急缺陷') + '">' + (isCrit ? '✓' : '⚠') + '</button>';
+    var criticalBtn = '<button class="action-icon-btn critical-toggle-btn ' + (isCrit ? 'active' : '') + '" title="' + (isCrit ? '取消【' + esc(t) + '】的危急缺陷属性' : '将【' + esc(t) + '】设为危急缺陷') + '" data-category="' + esc(cat) + '" data-text="' + esc(t) + '" aria-label="' + (isCrit ? '取消危急缺陷' : '设为危急缺陷') + '">' + (isCrit ? ICONS.check : ICONS.warning) + '</button>';
     return '<div class="def-item ' + (isCrit ? 'is-critical-item' : '') + '" data-category="' + esc(cat) + '" data-text="' + esc(t) + '" title="' + (isCrit ? '【危急缺陷】' : '') + '点击应用此标签；按住可拖动排序或移动">' +
       critBadge +
       '<span class="t" style="' + textStyle + '">' + esc(t) + '</span>' +
@@ -640,7 +677,7 @@
 
         ptrGhost = document.createElement('div');
         ptrGhost.className = 'drag-ghost-badge';
-        ptrGhost.textContent = (ptrDrag.type === 'tag' ? '🏷️ ' + ptrDrag.tag : '📁 【' + ptrDrag.cat + '】');
+        ptrGhost.textContent = (ptrDrag.type === 'tag' ? ptrDrag.tag : '【' + ptrDrag.cat + '】');
         document.body.appendChild(ptrGhost);
       }
     }

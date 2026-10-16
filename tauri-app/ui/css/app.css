@@ -209,6 +209,173 @@
     align-items: center;
     flex: 0 0 auto;
     gap: 6px;
+    min-height: 24px;
+  }
+  .path-head-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .path-count-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 9px;
+    background: var(--hover);
+    color: var(--muted);
+    line-height: 1.3;
+  }
+  .path-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .mini-icon-btn {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  .mini-icon-btn:hover {
+    color: var(--text);
+    background: var(--hover);
+    border-color: var(--btn-border);
+  }
+  .mini-icon-btn:active {
+    background: var(--btn-bg);
+  }
+  .path-search-row {
+    position: relative;
+    margin-bottom: 6px;
+    flex: 0 0 auto;
+  }
+  .path-search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--btn-border);
+    border-radius: 4px;
+    padding: 0 6px 0 24px;
+    height: 26px;
+    box-sizing: border-box;
+    transition: border-color 140ms ease;
+  }
+  .path-search-wrap:focus-within {
+    border-color: var(--accent);
+  }
+  .path-search-icon {
+    position: absolute;
+    left: 7px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    pointer-events: none;
+    display: block;
+  }
+  .path-search-wrap input {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 11.5px;
+    color: var(--text);
+    padding: 0;
+    line-height: 24px;
+  }
+  .path-search-wrap input::placeholder {
+    color: var(--muted);
+    opacity: 0.8;
+  }
+  .path-search-clear {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--hover);
+    color: var(--muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 4px;
+    flex-shrink: 0;
+  }
+  .path-search-clear:hover {
+    color: var(--text);
+    background: rgba(198, 40, 40, 0.12);
+  }
+  .path-search-dropdown {
+    position: absolute;
+    top: calc(100% + 3px);
+    left: 0;
+    right: 0;
+    z-index: 90;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    max-height: 220px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 3px 0;
+  }
+  .path-search-dropdown-item {
+    padding: 5px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    font-size: 11.5px;
+    color: var(--text);
+    transition: background-color 80ms ease, color 80ms ease;
+    gap: 6px;
+    user-select: none;
+  }
+  .path-search-dropdown-item:hover,
+  .path-search-dropdown-item.active {
+    background: var(--hover);
+    color: var(--accent);
+  }
+  .path-search-dropdown-item .item-title {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1 1 auto;
+  }
+  .path-search-dropdown-item .item-meta {
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  .path-search-dropdown-item .search-match {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .path-summary-bar {
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    flex: 0 0 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.4;
   }
   .path-tools {
     display: flex;
@@ -216,7 +383,15 @@
     gap: 4px;
     margin-bottom: 8px;
     flex: 0 0 auto;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+  }
+  .path-tools .mini-tool-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 4px;
+    font-size: 10.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .mini-tool-btn {
     height: 22px;

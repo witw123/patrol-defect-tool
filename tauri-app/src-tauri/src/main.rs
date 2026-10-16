@@ -267,7 +267,10 @@ fn main() {
     let init_state = if stored_state.trim().is_empty() {
         "window.__PATROL_DATA__ = {};".to_string()
     } else {
-        format!("window.__PATROL_DATA__ = {};", stored_state)
+        match serde_json::from_str::<serde_json::Value>(&stored_state) {
+            Ok(val) => format!("window.__PATROL_DATA__ = {};", val),
+            Err(_) => "window.__PATROL_DATA__ = {};".to_string(),
+        }
     };
 
     tauri::Builder::default()
