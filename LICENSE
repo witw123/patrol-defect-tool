@@ -1,0 +1,70 @@
+# 巡检缺陷命名分类工具 源码使用与非商业许可协议
+# Patrol Defect Tool - Source-Available Non-Commercial License
+
+版权所有 (c) 2024-2026 witw123（巡检缺陷命名分类工具作者团队）。保留所有权利。
+Copyright (c) 2024-2026 witw123. All Rights Reserved.
+
+---
+
+### 重要声明 / IMPORTANT NOTICE
+
+本项目源代码公开发布仅供学习、技术研究与个人非商业性查阅使用。
+**严禁任何形式的商业利用、抄袭、盗用、二次包装转售或未授权分发。**
+Access to this source code is provided solely for personal study, research, and non-commercial evaluation. **Any commercial use, plagiarism, theft, repackaging, or unauthorized distribution is strictly prohibited.**
+
+---
+
+### 1. 许可授予 (Grant of License)
+
+在遵守本协议各项限制的前提下，版权所有者特此授予个人免费、非独占且不可转让的权利，仅用于：
+- 本地查阅、学习与技术研究；
+- 个人非商业性、非生产性的本地测试。
+
+Subject to the terms and limitations of this Agreement, the copyright holder hereby grants you a free, non-exclusive, non-transferable license solely for:
+- Personal inspection, educational study, and technical research;
+- Non-commercial and non-production local testing.
+
+---
+
+### 2. 严格禁止商业用途 (Commercial Use Strictly Prohibited)
+
+**本软件及其全部或部分源代码、算法、资产及衍生设计绝对禁止用于任何商业用途。** 商业用途包括但不限于：
+1. **销售与转售**：直接或间接出售本软件、打包安装程序、修改版或其任何部分；
+2. **商业服务与交付**：将本软件或其衍生品用于企业/事业单位的商业项目交付、商业巡检业务外包、招标响应或收费技术服务；
+3. **集成与捆绑**：将本软件的代码、模块或逻辑集成至任何闭源商业产品、硬件巡检设备或 SaaS 商业平台中；
+4. **盈利性运营**：通过提供本软件的下载、部署、使用收取任何直接或间接费用（包括付费广告、付费网盘或收费培训）。
+
+**No part of this software, including its source code, design, and assets, may be used for any commercial purpose.** Commercial purpose includes, but is not limited to:
+1. Selling, licensing, renting, or leasing the software or any modified version thereof;
+2. Utilizing the software in commercial project deliveries, paid inspection services, commercial tenders, or paid consultancy;
+3. Incorporating any portion of this software into commercial software, hardware equipment, or SaaS offerings;
+4. Monetizing access to the software directly or indirectly.
+
+---
+
+### 3. 禁止擅自盗用与抄袭 (Anti-Theft, Attribution & Integrity)
+
+1. **禁止盗用与更名**：严禁将本项目的任何源代码、架构设计、算法或界面逻辑擅自复制并声称为自身作品，严禁二次包装更名后对外发布。
+2. **禁止篡改版权**：在任何情况下，严禁删除、隐匿、修改本代码库及产物中的任何版权声明、作者标识或许可协议文本。
+3. **禁止非授权镜像与分发**：未经版权所有者书面授权，不得在第三方网站、公众号、软件站设立未经许可的商业镜像、分发渠道或重新打包安装包。
+
+1. **No Misappropriation or Plagiarism**: You may not copy, extract, or reuse any part of this codebase to create derivative products under a different name or claim authorship over any part of this work.
+2. **Preservation of Notices**: All copyright, trademark, and attribution notices contained in the source code and binaries must be retained intact.
+3. **No Unauthorized Redistribution**: You may not redistribute, sub-license, or republish pre-built binaries or modified code without explicit prior written consent from the copyright holder.
+
+---
+
+### 4. 商业授权途径 (Commercial Licensing)
+
+如需将本项目应用于商业环境、电力企业量产部署、系统集成或定制开发，必须事先获得版权所有者的正式书面商业授权：
+- 官方联系方式：请通过 GitHub 仓库 [patrol-defect-tool Issues / Discussions](https://github.com/witw123/patrol-defect-tool) 或作者主页进行商务咨询。
+
+If you wish to use this software for commercial purposes, enterprise deployment, or third-party integration, you must obtain a formal written commercial license from the author in advance.
+
+---
+
+### 5. 免责声明 (Disclaimer of Warranty)
+
+本软件按“现状”提供，不包含任何明示或暗示的担保（包括但不限于适销性、特定用途适用性及非侵权保证）。在任何情况下，作者均不对因使用或无法使用本软件所导致的任何直接、间接或连带损失承担责任。
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.

@@ -57,3 +57,17 @@ npm run build
 产物生成于：
 - 免安装便携版：`tauri-app/src-tauri/target/release/PatrolDefect.exe`
 - 安装程序：`tauri-app/src-tauri/target/release/bundle/nsis/巡检缺陷命名分类工具_<版本>_x64-setup.exe`
+
+---
+
+## 许可证与版权声明 (License & Copyright)
+
+本项目采用 **[非商业源码可用许可协议 (Non-Commercial Source-Available License)](./LICENSE)**：
+
+- ❌ **严禁商业利用**：禁止任何形式的商业销售、转售、商业项目交付、硬件/软件捆绑或收费运营。
+- ❌ **严禁抄袭盗用**：禁止擅自复制、反编译、二次包装更名发布或声称为自有作品；必须完整保留原作者版权署名。
+- ❌ **严禁未经授权分发**：禁止在第三方平台设立未经许可的商业镜像、二次打包或收费分发。
+- ✔️ **个人与研究可用**：仅允许个人非商业性学习、代码查阅与技术研究。
+
+商业授权合作或企业级定制请通过 GitHub Issues 联系作者团队。
+Copyright (c) 2024-2026 witw123. All Rights Reserved.
