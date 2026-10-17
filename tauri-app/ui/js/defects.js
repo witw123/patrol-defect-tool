@@ -254,33 +254,28 @@
     } catch (e) {}
   }
 
-  var saveViewedTimer = null;
-  function saveViewedPhotos(immediate) {
-    if (immediate) {
-      if (saveViewedTimer) { clearTimeout(saveViewedTimer); saveViewedTimer = null; }
-      try {
-        localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap));
-        if (typeof localStorage.flush === "function") localStorage.flush();
-      } catch (e) {
-        console.warn("saveViewedPhotos immediate error:", e);
-      }
-      return;
+  // 核心架构决策：已看系统完全在内存中维护，切图、看图、缩放期间绝对不触发任何磁盘 I/O 或后台定时器！
+  // 严格仅在【窗口关闭/页面隐藏】或【切换工程目录】时即刻无损落盘，其余时候彻底零占用。
+  var isViewedDirty = false;
+  function markViewedDirty() { isViewedDirty = true; }
+  window.markViewedDirty = markViewedDirty;
+
+  function saveViewedPhotos(force) {
+    if (!force && !isViewedDirty) return;
+    try {
+      localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap));
+      if (typeof localStorage.flush === "function") localStorage.flush();
+      isViewedDirty = false;
+    } catch (e) {
+      console.warn("saveViewedPhotos error:", e);
     }
-    // 核心优化：切图与缩放期间绝对零 I/O、零序列化！
-    // 仅在用户完全停顿 2500ms 以上（真正在看图/停歇）后，才在后台默默防抖写盘
-    if (saveViewedTimer) clearTimeout(saveViewedTimer);
-    saveViewedTimer = setTimeout(function () {
-      saveViewedTimer = null;
-      try {
-        localStorage.setItem(KEY_VIEWED, JSON.stringify(viewedPhotosMap));
-      } catch (e) {
-        console.warn("saveViewedPhotos error:", e);
-      }
-    }, 2500);
   }
+  window.saveViewedPhotos = saveViewedPhotos;
+
   window.addEventListener("beforeunload", function () {
     saveViewedPhotos(true);
     try {
+      if (typeof backupViewedPhotosImmediate === "function") backupViewedPhotosImmediate();
       if (outputManifestWriteTimer) {
         clearTimeout(outputManifestWriteTimer);
         outputManifestWriteTimer = null;
@@ -290,11 +285,15 @@
   });
   window.addEventListener("pagehide", function () {
     saveViewedPhotos(true);
+    try {
+      if (typeof backupViewedPhotosImmediate === "function") backupViewedPhotosImmediate();
+    } catch (e) {}
   });
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) {
       saveViewedPhotos(true);
       try {
+        if (typeof backupViewedPhotosImmediate === "function") backupViewedPhotosImmediate();
         if (outputManifestWriteTimer) {
           clearTimeout(outputManifestWriteTimer);
           outputManifestWriteTimer = null;

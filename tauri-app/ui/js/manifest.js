@@ -174,22 +174,18 @@
     }
   }
 
-  var backupViewedTimer = null;
-  function scheduleBackupViewedPhotos() {
+  async function backupViewedPhotosImmediate() {
     if (!output.mainHandle) return;
-    if (backupViewedTimer) clearTimeout(backupViewedTimer);
-    backupViewedTimer = setTimeout(async function () {
-      backupViewedTimer = null;
-      try {
-        if (typeof viewedPhotosMap !== 'undefined' && viewedPhotosMap && Object.keys(viewedPhotosMap).length > 0) {
-          var vfh = await output.mainHandle.getFileHandle('.巡检已看记录.json', { create: true });
-          var vw = await vfh.createWritable();
-          await vw.write(JSON.stringify(viewedPhotosMap));
-          await vw.close();
-        }
-      } catch (e) {}
-    }, 5000);
+    try {
+      if (typeof viewedPhotosMap !== 'undefined' && viewedPhotosMap && Object.keys(viewedPhotosMap).length > 0) {
+        var vfh = await output.mainHandle.getFileHandle('.巡检已看记录.json', { create: true });
+        var vw = await vfh.createWritable();
+        await vw.write(JSON.stringify(viewedPhotosMap));
+        await vw.close();
+      }
+    } catch (e) {}
   }
+  window.backupViewedPhotosImmediate = backupViewedPhotosImmediate;
 
   function manifestSet(outRelPath, origName, relPath, line) {
     if (!outRelPath || !origName) return;

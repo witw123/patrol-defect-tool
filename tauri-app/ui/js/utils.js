@@ -147,6 +147,8 @@
     if (!window.__viewedSet) window.__viewedSet = new Set();
     window.__viewedSet.add(k);
     if (viewedPhotosMap) viewedPhotosMap[k] = 1;
+    if (typeof markViewedDirty === 'function') markViewedDirty();
+    else if (typeof window !== 'undefined' && typeof window.markViewedDirty === 'function') window.markViewedDirty();
     if (typeof state !== 'undefined' && state && state.index >= 0) {
       if (state.index > (state.lastViewedIndex || -1)) {
         state.lastViewedIndex = state.index;

@@ -570,9 +570,6 @@
 
     var curF = state.files[index];
     var isNewlyViewed = markFileViewed(curF);
-    if (isNewlyViewed) {
-      saveViewedPhotos();
-    }
 
     if (isNewlyViewed && filterMode === 'unviewed') {
       invalidateFilterList();

@@ -83,6 +83,11 @@
       return;
     }
 
+    // 核心保证：切换或重新选择目录前，即刻无损落盘当前工程的已看记录
+    if (typeof saveViewedPhotos === 'function') {
+      try { saveViewedPhotos(true); } catch (e) {}
+    }
+
     // 1. 如果未指定强制重新选择，且已有记忆的输入目录句柄，直接尝试一键重新连接恢复
     if (!forceNewPicker && lastInputHandle && state.files.length === 0) {
       try {
@@ -1711,9 +1716,7 @@
     if (state.index !== idx) {
       state.index = idx;
       var curPhoto = state.files[idx];
-      if (markFileViewed(curPhoto)) {
-        saveViewedPhotos();
-      }
+      markFileViewed(curPhoto);
       updateHud();
       renderSide();
       getImage(idx).then(function (c) {
