@@ -172,15 +172,23 @@
     } catch (e) {
       console.warn('写入输出清单失败:', e);
     }
-    // 同步将已看记录备份写入输出目录中的 .巡检已看记录.json（方便跨设备拷贝工程目录保留已看进度）
-    try {
-      if (typeof viewedPhotosMap !== 'undefined' && viewedPhotosMap && Object.keys(viewedPhotosMap).length > 0) {
-        var vfh = await output.mainHandle.getFileHandle('.巡检已看记录.json', { create: true });
-        var vw = await vfh.createWritable();
-        await vw.write(JSON.stringify(viewedPhotosMap));
-        await vw.close();
-      }
-    } catch (e) {}
+  }
+
+  var backupViewedTimer = null;
+  function scheduleBackupViewedPhotos() {
+    if (!output.mainHandle) return;
+    if (backupViewedTimer) clearTimeout(backupViewedTimer);
+    backupViewedTimer = setTimeout(async function () {
+      backupViewedTimer = null;
+      try {
+        if (typeof viewedPhotosMap !== 'undefined' && viewedPhotosMap && Object.keys(viewedPhotosMap).length > 0) {
+          var vfh = await output.mainHandle.getFileHandle('.巡检已看记录.json', { create: true });
+          var vw = await vfh.createWritable();
+          await vw.write(JSON.stringify(viewedPhotosMap));
+          await vw.close();
+        }
+      } catch (e) {}
+    }, 5000);
   }
 
   function manifestSet(outRelPath, origName, relPath, line) {

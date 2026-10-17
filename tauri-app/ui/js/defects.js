@@ -266,7 +266,8 @@
       }
       return;
     }
-    // 连续切图时采用后置防抖（350ms）：用户快速翻图期间绝对不触发序列化与写盘，停顿或退出时自动落盘
+    // 核心优化：切图与缩放期间绝对零 I/O、零序列化！
+    // 仅在用户完全停顿 2500ms 以上（真正在看图/停歇）后，才在后台默默防抖写盘
     if (saveViewedTimer) clearTimeout(saveViewedTimer);
     saveViewedTimer = setTimeout(function () {
       saveViewedTimer = null;
@@ -275,7 +276,7 @@
       } catch (e) {
         console.warn("saveViewedPhotos error:", e);
       }
-    }, 350);
+    }, 2500);
   }
   window.addEventListener("beforeunload", function () {
     saveViewedPhotos(true);
@@ -293,23 +294,27 @@
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) {
       saveViewedPhotos(true);
-      if (outputManifestWriteTimer) {
-        clearTimeout(outputManifestWriteTimer);
-        outputManifestWriteTimer = null;
-        saveOutputManifestNow();
-      }
+      try {
+        if (outputManifestWriteTimer) {
+          clearTimeout(outputManifestWriteTimer);
+          outputManifestWriteTimer = null;
+          saveOutputManifestNow();
+        }
+      } catch (e) {}
     }
   });
   function loadViewedPhotos() {
     try {
+      if (!window.__viewedSet) window.__viewedSet = new Set();
       var raw = localStorage.getItem(KEY_VIEWED);
       if (raw) {
         var obj = JSON.parse(raw);
         if (obj && typeof obj === 'object') {
           for (var k in obj) {
             if (obj[k]) {
-              viewedPhotosMap[k] = true;
-              if (k.indexOf('\\') >= 0) viewedPhotosMap[k.replace(/\\/g, '/')] = true;
+              var cleanK = (k.indexOf('\\') >= 0) ? k.replace(/\\/g, '/') : k;
+              viewedPhotosMap[cleanK] = 1;
+              window.__viewedSet.add(cleanK);
             }
           }
         }
@@ -318,8 +323,9 @@
       if (typeof state !== 'undefined' && state && state.markedFiles) {
         state.markedFiles.forEach(function (mk) {
           if (mk) {
-            viewedPhotosMap[mk] = true;
-            if (mk.indexOf('\\') >= 0) viewedPhotosMap[mk.replace(/\\/g, '/')] = true;
+            var cleanMk = (mk.indexOf('\\') >= 0) ? mk.replace(/\\/g, '/') : mk;
+            viewedPhotosMap[cleanMk] = 1;
+            window.__viewedSet.add(cleanMk);
           }
         });
       }

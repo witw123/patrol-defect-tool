@@ -1020,17 +1020,41 @@
         await w.close();
       }
 
-      var writeTasks = [
-        writeStream(targetBoxed, boxedBlob),
-        writeStream(targetOrig, cleanBlob)
-      ];
+      // 1. 圈示图常规写入
+      await writeStream(targetBoxed, boxedBlob);
 
-      if (isCritical && criticalFolderHandle) {
-        var targetCritical = await criticalFolderHandle.getFileHandle(outFileName, { create: true });
-        writeTasks.push(writeStream(targetCritical, boxedBlob));
+      // 2. 原图保存：极速零拷贝优先（直接操作系统级快速文件复制，彻底省去JS读入与内存传输）
+      var origSrcPath = (f.handle && f.handle.__path) || (cleanBlob && cleanBlob.__sourcePath);
+      var origDstPath = targetOrig && targetOrig.__path;
+      var origCopied = false;
+      if (origSrcPath && origDstPath && window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
+        try {
+          await window.__TAURI__.core.invoke('copy_file', { from: origSrcPath, to: origDstPath });
+          origCopied = true;
+        } catch (e) {
+          console.warn('原图原生复制回退:', e);
+        }
+      }
+      if (!origCopied) {
+        await writeStream(targetOrig, cleanBlob);
       }
 
-      await Promise.all(writeTasks);
+      // 3. 危急缺陷副本：直接快速拷贝刚生成的圈示图（免重新编码写盘）
+      if (isCritical && criticalFolderHandle) {
+        var targetCritical = await criticalFolderHandle.getFileHandle(outFileName, { create: true });
+        var critCopied = false;
+        var boxedDstPath = targetBoxed && targetBoxed.__path;
+        var critDstPath = targetCritical && targetCritical.__path;
+        if (boxedDstPath && critDstPath && window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
+          try {
+            await window.__TAURI__.core.invoke('copy_file', { from: boxedDstPath, to: critDstPath });
+            critCopied = true;
+          } catch (e) {}
+        }
+        if (!critCopied) {
+          await writeStream(targetCritical, boxedBlob);
+        }
+      }
 
       // 输出清单精确映射：输出文件 → 原图（按整个线路归档清单，非支线）
       var manifestRel = f.relPath || fKey;

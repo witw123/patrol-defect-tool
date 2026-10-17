@@ -191,8 +191,9 @@
 
   var preloadQueue = [];
   var activePreloadCount = 0;
-  var MAX_CONCURRENT_PRELOAD = 2; // 双路后台异步解码，充分发挥多核并发优势
+  var MAX_CONCURRENT_PRELOAD = 1; // 单路后台轻量解码，杜绝后台暴挤 CPU/GPU
   var preloadGeneration = 0;      // 换代计数器：切图时作废旧代任务
+  var preloadDebounceTimer = null;
 
   function schedulePreload(curIdx) {
     schedulePreloadAhead(curIdx);
@@ -200,6 +201,20 @@
 
   function schedulePreloadAhead(curIdx) {
     if (!state.files || state.files.length === 0 || curIdx < 0) return;
+    // 若用户正在缩放滚轮交互，绝对不抢占计算资源
+    if (typeof window !== 'undefined' && window.__isZooming) return;
+
+    if (preloadDebounceTimer) clearTimeout(preloadDebounceTimer);
+    preloadDebounceTimer = setTimeout(function () {
+      preloadDebounceTimer = null;
+      executePreloadAhead(curIdx);
+    }, 120);
+  }
+
+  function executePreloadAhead(curIdx) {
+    if (!state.files || state.files.length === 0 || curIdx < 0) return;
+    if (typeof window !== 'undefined' && window.__isZooming) return;
+
     preloadGeneration++;
     var thisGen = preloadGeneration;
 
@@ -207,9 +222,9 @@
     var seen = new Set();
     seen.add(curIdx);
 
-    // 1. 向前预测 3~4 张（主切图方向）
+    // 1. 贴身向前预测 1~2 张（主切图方向）
     var fwd = curIdx;
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 2; i++) {
       var next = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(fwd, 1) : (fwd + 1);
       if (next >= 0 && next < state.files.length && !seen.has(next)) {
         seen.add(next);
@@ -220,17 +235,11 @@
       }
     }
 
-    // 2. 向后缓冲 2 张（回看微缓冲）
-    var bwd = curIdx;
-    for (var j = 0; j < 2; j++) {
-      var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(bwd, -1) : (bwd - 1);
-      if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
-        seen.add(prev);
-        targets.push({ idx: prev, priority: 12 - j * 2 });
-        bwd = prev;
-      } else {
-        break;
-      }
+    // 2. 向后缓冲 1 张（回看微缓冲）
+    var prev = (typeof getNextFilteredIndex === 'function') ? getNextFilteredIndex(curIdx, -1) : (curIdx - 1);
+    if (prev >= 0 && prev < state.files.length && !seen.has(prev)) {
+      seen.add(prev);
+      targets.push({ idx: prev, priority: 12 });
     }
 
     // 过滤掉已处于有效缓存中的目标
@@ -248,7 +257,6 @@
       }
     }
 
-    // 按优先级从高到低排列
     pendingItems.sort(function (a, b) { return b.priority - a.priority; });
     preloadQueue = pendingItems.map(function (item) { return item.idx; });
 
@@ -257,6 +265,8 @@
 
   function processPreloadQueue(gen) {
     if (gen !== preloadGeneration) return;
+    if (typeof window !== 'undefined' && window.__isZooming) return;
+
     while (activePreloadCount < MAX_CONCURRENT_PRELOAD && preloadQueue.length > 0) {
       var nextIdx = preloadQueue.shift();
       activePreloadCount++;

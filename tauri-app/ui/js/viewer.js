@@ -1,4 +1,4 @@
-﻿// 画布渲染引擎 (GPU加速/RAF批处理)、坐标映射、缩放平移与红框标注交互
+// 画布渲染引擎 (GPU加速/RAF批处理)、坐标映射、缩放平移与红框标注交互
 
 
   /* ================= 视图渲染 ================= */
@@ -88,6 +88,9 @@
     ctx.translate(-v.cx, -v.cy);
   }
   var currentRenderedImg = null;
+  var isInteractiveZooming = false;
+  var zoomQualityRestoreTimer = null;
+
   function renderBase(overrideImg) {
     var v = state.view;
     if (!v || !v.w || !v.h) return;
@@ -101,7 +104,8 @@
     baseCtx.clearRect(0, 0, v.w, v.h);
     if (img) {
       baseCtx.imageSmoothingEnabled = true;
-      baseCtx.imageSmoothingQuality = 'medium';
+      // 核心优化：快速缩放平移交互时启用开销极低的硬件插值，消除4K/8K大图频繁重绘卡顿；静止后恢复高清
+      baseCtx.imageSmoothingQuality = isInteractiveZooming ? 'low' : 'medium';
       setViewTransform(baseCtx);
       baseCtx.drawImage(img, 0, 0, v.w, v.h);
       currentRenderedImg = img;
@@ -442,7 +446,17 @@
     pendingWheelEvents = [];
 
     if (zoomChanged) {
+      isInteractiveZooming = true;
+      if (typeof window !== 'undefined') window.__isZooming = true;
       render();
+
+      if (zoomQualityRestoreTimer) clearTimeout(zoomQualityRestoreTimer);
+      zoomQualityRestoreTimer = setTimeout(function () {
+        zoomQualityRestoreTimer = null;
+        isInteractiveZooming = false;
+        if (typeof window !== 'undefined') window.__isZooming = false;
+        render();
+      }, 120);
     }
   }
 

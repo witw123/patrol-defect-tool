@@ -125,32 +125,34 @@
   function curName() { var f = curFile(); return f ? f.name : null; }
   function curKey() { var f = curFile(); return f ? fileKey(f) : ''; }
 
+  function normKey(k) {
+    if (!k || typeof k !== 'string') return '';
+    return k.indexOf('\\') >= 0 ? k.replace(/\\/g, '/') : k;
+  }
+
   function isFileViewed(f) {
     if (!f) return false;
-    var k = fileKey(f);
-    if (viewedPhotosMap) {
-      if (viewedPhotosMap[k]) return true;
-      if (f.name && viewedPhotosMap[f.name]) return true;
-    }
-    if (state && state.markedFiles) {
-      if (state.markedFiles.has(k)) return true;
-      if (f.name && state.markedFiles.has(f.name)) return true;
-    }
+    var k = normKey(fileKey(f));
+    if (window.__viewedSet && window.__viewedSet.has(k)) return true;
+    if (viewedPhotosMap && viewedPhotosMap[k]) return true;
+    if (state && state.markedFiles && state.markedFiles.has(k)) return true;
     return false;
   }
 
   function markFileViewed(f) {
-    if (!f || !viewedPhotosMap) return false;
-    var isNew = !isFileViewed(f);
-    var k = fileKey(f);
-    if (k) viewedPhotosMap[k] = true;
-    if (f.name) viewedPhotosMap[f.name] = true;
+    if (!f) return false;
+    var k = normKey(fileKey(f));
+    if (!k) return false;
+    if (isFileViewed(f)) return false;
+    if (!window.__viewedSet) window.__viewedSet = new Set();
+    window.__viewedSet.add(k);
+    if (viewedPhotosMap) viewedPhotosMap[k] = 1;
     if (typeof state !== 'undefined' && state && state.index >= 0) {
       if (state.index > (state.lastViewedIndex || -1)) {
         state.lastViewedIndex = state.index;
       }
     }
-    return isNew;
+    return true;
   }
 
   function getMeta(target) {
